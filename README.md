@@ -1,228 +1,313 @@
 # Personal Debt Tracker
 
-Track credit card balances, see true **monthly interest burn**, get **FICO “threshold nudge”** hints, and plan **0% balance transfers** — all in a clean, offline-friendly web app powered by Firebase.
+Track credit card balances, see true monthly interest burn, get FICO “threshold nudge” hints, and plan 0% balance transfers — all in a clean, offline-friendly web app powered by Firebase.
 
-> Built for real-world decisions: visibility, speed, and zero fluff.
 
----
+> A lightweight, privacy-conscious planner to manage credit cards, visualize utilization, and optimize balance transfers. Built for real-world, mobile-first use.
 
-## Tech Stack
+<p>
+  <img alt="Firebase" src="https://img.shields.io/badge/Firebase-Auth%20|%20Firestore-ffca28?logo=firebase&logoColor=000&labelColor=fff" />
+  <img alt="Tailwind" src="https://img.shields.io/badge/TailwindCSS-utility%20first-38bdf8?logo=tailwindcss&logoColor=fff" />
+  <img alt="PWA" src="https://img.shields.io/badge/PWA-offline%20first-5a0fc8?logo=googlechrome&logoColor=fff" />
+  <img alt="GitHub Pages" src="https://img.shields.io/badge/GitHub%20Pages-Actions%20deploy-222?logo=github&logoColor=fff" />
+</p>
 
-![HTML5](https://img.shields.io/badge/HTML5-E34F26?logo=html5\&logoColor=white)
-![JavaScript](https://img.shields.io/badge/JavaScript-323330?logo=javascript)
-![TailwindCSS](https://img.shields.io/badge/Tailwind-38B2AC?logo=tailwindcss\&logoColor=white)
-![Firebase Auth](https://img.shields.io/badge/Firebase_Auth-FFCA28?logo=firebase\&logoColor=black)
-![Firestore](https://img.shields.io/badge/Cloud_Firestore-039BE5?logo=firebase\&logoColor=white)
-![PWA](https://img.shields.io/badge/PWA-5A0FC8?logo=pwa\&logoColor=white)
+[![GitHub Pages](https://img.shields.io/badge/demo-GitHub%20Pages-blue)](https://heyavijitroy.github.io/PersonalDebtTracker/)
 
-* **UI**: HTML + Tailwind (responsive, mobile-first, accessible)
-* **Auth**: Google Sign-In (Firebase Auth)
-* **Data**: Cloud Firestore (real-time sync + **offline persistence**)
-* **PWA-ready**: service worker hook included (optional app-shell caching)
+## ✨ Features
 
----
+* **Auth + Sync**: Google sign-in with Firestore syncing (offline-first).
+* **Inline edit**: Edit accounts in-place (row expands to full-width inputs).
+  Save/Cancel buttons + *Enter to save*, *Esc to cancel*.
+* **Smart visuals**:
 
-## Demo Highlights
-
-* **KPI Tiles**: Total Debt, Total Credit, Monthly Interest (live math).
-* **Accounts**: Add/Edit/Delete with **inline edit**, **undo delete (5s)**, and **input guardrails**.
-* **Sorting**: by Name, APR, Balance, Utilization, or Interest/\$100 (asc/desc).
-* **Utilization Visuals**: bar or donut (**pie**) per account + risk badges (Healthy / >30% / >50% / >80%).
-* **Credit Score Hints (FICO optics)**:
-
-  * Shows how many cards sit above **30/50/80%** utilization.
-  * **Cheapest “threshold nudges”** with exact dollars to drop below the next tier.
-  * **Total \$** needed to bring overall utilization to **50%** and **30%**.
+  * Dynamic font fit for long account names (stays on one line).
+  * Utilization **bar or donut** view (toggle).
+  * Risk badges (Healthy / Watch / Medium / High).
+  * **0% APR** chips surfaced directly on cards.
+* **FICO “threshold nudges”**: Cheapest dollars to drop to hit **30%/50%/80%** per-card + overall minimums.
 * **Strategies**:
 
-  * **Debt Avalanche** (highest APR first).
-  * **Debt Snowball** (lowest balance first).
-  * **Most Expensive Balances** ranked by **interest cost per \$100**.
+  * **Debt Avalanche** (highest APR first)
+  * **Debt Snowball** (lowest balance first)
+  * **Most Expensive** (interest per \$100 ranking)
 * **Balance-Transfer Optimizer**:
 
-  * **Dropdown target** (auto-populated from your accounts) with **0% APR badge** and auto-select heuristics.
-  * Inputs: limit, intro months, transfer fee, optional **cap utilization**.
-  * Output: recommended moves, monthly savings, intro-period net savings after fees.
-  * **Reset** button to clear the planner.
-* **Export**: one-click **CSV** or **JSON** (no server).
-* **Keyboard UX**: **Enter** to save, **Esc** to cancel (while inline editing).
-* **Accessibility**: focus rings, skip-to-content, ARIA where it matters.
+  * Dropdown to pick target 0% card, optional cap utilization on target.
+  * Calculates move list, monthly savings, intro-period net savings vs. fees.
+  * **Reset** button to clear inputs/results.
+* **Quality of life**:
+
+  * **Undo delete** (5-second toast).
+  * **Export** CSV/JSON.
+  * **PWA**: installable, offline-first (‘view & add’ work offline; syncs when online).
+  * **Mobile-first** responsive layout.
+  * Accessibility: keyboard support, focus rings, ARIA labels, high-contrast chips.
+
+> ⚠️ **Disclaimer**: For educational purposes. Not financial advice.
 
 ---
 
-## How It Works
+## 🧱 Tech Stack
 
-### Data Model (Firestore)
+* **Frontend**: HTML + TailwindCSS (no build step required).
+* **State/Sync**: Firebase Auth + Firestore (with IndexedDB persistence).
+* **PWA**: Service worker + install prompt.
+* **CI/CD**: GitHub Actions → GitHub Pages.
+* **Secrets**: Injected at build time via Actions (no keys in repo).
 
-Each user has a private subcollection of `cards`:
+---
 
-```jsonc
-{
-  "name": "Amex Blue Cash",
-  "balance": 3697.15,        // number
-  "apr": 29.24,              // percent APR (0 => 0% intro APR)
-  "creditLimit": 4000        // number
+## 🚀 Live Demo
+
+* Deployed via **GitHub Pages** using Actions.
+* Keys are supplied at build time (see below). `env.js` is generated on the server—**never committed**.
+
+---
+
+## 📦 Data Model
+
+```json
+artifacts/{projectId}/users/{uid}/cards/{cardId} = {
+  "name": "Amex",
+  "balance": 3697.15,
+  "apr": 29.24,
+  "creditLimit": 4000
 }
 ```
 
-* **Monthly interest** per card = `balance * (apr / 100) / 12`.
-* **Interest per \$100** = `monthlyInterest(100, apr)` — used to rank expensive balances.
-* **Utilization** per card = `balance / creditLimit`.
-* **Overall utilization** = `sum(balance) / sum(limit)`.
-
-### Optimizer Logic (0% APR)
-
-1. **Target** = selected account (prefer **0% APR**; otherwise pick card with most **available room**).
-2. **Budget** = min(input limit, remaining room on target, optional cap).
-3. Transfer from source cards (excluding the target) in descending **interest/\$100** until budget is exhausted.
-4. Compute **monthly savings**, **intro-period savings**, **fees**, and **net**.
+* Derived metrics: utilization, monthly interest, interest per \$100.
+* All calculations happen **client-side**.
 
 ---
 
-## Screens & UX Details
+## 🛠️ Getting Started (Local)
 
-### Accounts
+1. **Firebase Console**
 
-* **Inline Edit** expands fields to full width (easier typing).
-* **Name fitting**: single-line ellipsis with auto font-shrink for long names (no layout jump).
-* **0% APR** accounts show a green badge in list + optimizer dropdown.
-* **Undo Delete**: toast with **Undo** (5s).
+   * Create a web app and enable **Google** provider.
+   * Auth → **Authorized domains**: add `localhost` and `127.0.0.1`.
+   * Firestore → set **Security Rules** (see sample below).
 
-### Sorting & Views
+2. **Create `env.js` locally** *(ignored by git)*:
 
-* `Sort by`: **Name / APR / Balance / Utilization / Interest per \$100**
-* `View`: **Bar** or **Pie** (donut). Pie mode is compact — two cards per row on md screens.
+```js
+// env.js (local only; NOT committed)
+window.__FIREBASE_CONFIG = {
+  apiKey: "…",
+  authDomain: "your-project.firebaseapp.com",
+  projectId: "your-project",
+  storageBucket: "your-project.firebasestorage.app",
+  messagingSenderId: "…",
+  appId: "…",
+  measurementId: "G-…"
+};
+```
 
-### Score Hints
+3. **Ensure load order in `index.html`** (in `<head>`):
 
-* Shows counts above **30/50/80%**, total dollars to tame each band, and “cheapest” per-card nudges (dollar amounts to drop below the next tier).
+```html
+<script src="env.js"></script>           <!-- must load first -->
+<script type="module" src="app.js"></script>
+```
 
-### Optimizer (0% Planner)
+4. **Run locally** (serve over HTTP, not file://):
 
-* **Target dropdown** auto-populates from cards (with current balance + utilization).
-* Auto-pick heuristics:
-
-  * Prefer any **0% APR** card (largest limit if multiple).
-  * Otherwise pick the card with the most **available room**.
-* **Reset** button restores a clean planner state.
-
-### Keyboard
-
-* Inline Edit: **Enter** = save, **Esc** = cancel.
+```bash
+npx serve .
+# or
+python3 -m http.server 5173
+```
 
 ---
 
-## Setup
+## 🔐 Security Rules (example)
 
-> This is a static, client-side app. You only need Firebase project config + a static host.
-
-### 1) Firebase Project
-
-* Create a Firebase project; enable:
-
-  * **Authentication ➜ Google Sign-in**
-  * **Firestore Database**
-* Add **Authorized domains** (e.g., `localhost`, your site).
-* Grab the **web app config** and replace the `firebaseConfig` in `app.js`.
-
-### 2) Firestore Security Rules
-
-You said they’re already in place. If you need a simple starting point:
 
 ```js
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /artifacts/{projectId}/users/{userId}/cards/{cardId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+    match /artifacts/{project}/users/{uid}/cards/{cardId} {
+      allow read, write: if request.auth.uid == uid;
     }
   }
 }
 ```
 
-### 3) Run Locally
+* This prevents cross-user access.
+* Future consideration: Adding field validations with **Rules** or **App Check** later for abuse protection.
 
-Because `app.js` uses ES modules, serve over HTTP (not `file://`).
+---
 
-```bash
-# any simple static server works
-npx serve .
-# or
-python -m http.server 5173
+## 🌐 Deploying to GitHub Pages (No Keys in Repo)
+
+**Why**: Avoids scanners flagging your repo and keeps config out of version control.
+
+1. **Add GitHub Actions Secrets**
+   Repo → Settings → *Secrets and variables* → **Actions** → New repository secret:
+
+```
+FIREBASE_API_KEY
+FIREBASE_AUTH_DOMAIN
+FIREBASE_PROJECT_ID
+FIREBASE_STORAGE_BUCKET
+FIREBASE_MESSAGING_SENDER_ID
+FIREBASE_APP_ID
+FIREBASE_MEASUREMENT_ID
 ```
 
-Open `http://localhost:3000` (or shown port).
+2. **Ignore local `env.js`**
 
-### 4) Deploy
-
-* **GitHub Pages**, **Vercel**, **Netlify**, or your host of choice.
-* Ensure the domain is added to Firebase Auth’s authorized domains.
-
----
-
-## Optional: PWA Install
-
-The app already:
-
-* Enables **Firestore offline persistence** (works offline for data).
-* Registers a service worker if `/sw.js` exists.
-
-To finish PWA:
-
-1. Create `/manifest.webmanifest` (name, icons, theme).
-2. Create `/sw.js` that caches static assets (index, app.js, CSS, fonts).
-3. Ensure `<link rel="manifest" href="/manifest.webmanifest">` is in `index.html`.
-
-> Want me to drop a minimal `sw.js` + `manifest.webmanifest`? I’ll add them with sane defaults.
-
----
-
-## Project Structure
-
-```text
-/
-├─ index.html          # Tailwind UI + sections + controls
-├─ app.js              # Auth, Firestore, rendering, optimizer, exports, UX glue
-├─ (optional) sw.js    # PWA service worker
-└─ (optional) manifest.webmanifest
+```gitignore
+env.js
 ```
 
+3. **Workflow** `.github/workflows/static.yml` generates `env.js` at build time:
+
+```yaml
+name: Deploy to GitHub Pages
+on:
+  push: { branches: [ main ] }
+  workflow_dispatch:
+permissions: { contents: read, pages: write, id-token: write }
+concurrency: { group: "pages", cancel-in-progress: true }
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build static site
+        run: |
+          mkdir -p dist
+          rsync -av --delete --exclude ".git*" --exclude ".github" --exclude "env.js" ./ dist/
+      - name: Generate env.js from secrets
+        run: |
+          cat > dist/env.js << 'EOF'
+          window.__FIREBASE_CONFIG = {
+            apiKey: "${{ secrets.FIREBASE_API_KEY }}",
+            authDomain: "${{ secrets.FIREBASE_AUTH_DOMAIN }}",
+            projectId: "${{ secrets.FIREBASE_PROJECT_ID }}",
+            storageBucket: "${{ secrets.FIREBASE_STORAGE_BUCKET }}",
+            messagingSenderId: "${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}",
+            appId: "${{ secrets.FIREBASE_APP_ID }}",
+            measurementId: "${{ secrets.FIREBASE_MEASUREMENT_ID }}"
+          };
+          EOF
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: dist }
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    environment: { name: github-pages, url: ${{ steps.deployment.outputs.page_url }} }
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+```
+
+4. **Settings → Pages** → Build with **GitHub Actions**.
+
 ---
 
-## Export / Import
+## 🧭 Usage Notes
 
-* **Export**: CSV / JSON buttons in the header (also duplicated near optimizer on small screens).
-* **Import**: (roadmap) Paste JSON ➜ validate ➜ merge/replace with dupe detection.
+* **Sort** by Name / APR / Balance / Utilization / Interest per \$100.
+* **Utilization View**: switch **Bar ↔ Pie** (donut) in the controls.
+* **Inline edit**: click ✏️ → fields expand to separate rows for typing comfort.
+* **Undo delete**: 5-sec toast with **Undo**.
+* **Export**: CSV / JSON from the header action.
+* **Optimizer**:
 
----
-
-## Accessibility & Mobile
-
-* **Skip link**, focus rings, aria labels on interactive controls.
-* Buttons use **min hit target** (36px+) and clear contrasts.
-* Layout adapts from single column ➜ two columns on md+ screens.
-
----
-
-## Notes & Decisions
-
-* **Risk badges** (Healthy / Watch / Medium / High) are based on utilization thresholds and intended for **score optics**, not moral judgment.
-* **0% APR detection** is simple (`apr <= 0.01`). If you later store `promoMonths` or `isZeroAprPromo`, we’ll prefer the flag.
-* **Financial disclaimer**: This app provides calculations and heuristics — not financial advice.
+  * Select the **0% target card** from dropdown.
+  * Optionally set **Cap Utilization** for target to avoid “maxed” optics.
+  * Shows move list + net savings (intro vs fee).
 
 ---
 
-## Roadmap
+## ♿ Accessibility
 
-* Import JSON dialog (merge/replace with diff preview).
-* “What-if” payoff simulator with extra payment slider.
-* Multi-goal optimizer (min monthly interest vs. hit score optics first).
-* Tagging (business/personal) + filters.
-* XLSX export.
-* i18n + currency formatting options.
+* Keyboard: **Enter** saves, **Esc** cancels in edit mode.
+* Buttons have **ARIA labels**, focus rings.
+* Color coding includes redundant text labels (e.g., “Healthy / High”).
 
 ---
 
-## License
+## 📱 PWA & Offline
 
-MIT — do what you want; a credit to **@AvijitRoy** / **#DotNetWithRoy** is appreciated.
+* Works offline for most flows; queued writes sync when back online.
+* To reset offline cache (dev): DevTools → Application → Clear storage.
+
+---
+
+## 🔮 Future Scope — **Client-Side Encryption (“Lock Mode”)**
+
+**Goal**: data is encrypted in the browser before hitting Firestore, so even project admins cannot read card details.
+
+### Threat Model
+
+* Protects against server-side reads (e.g., console, backups).
+* Does **not** protect if a user’s device is compromised while unlocked.
+
+### Approach
+
+* **Passphrase-based** key derivation (no keys stored on server).
+* Use **Web Crypto API**; derive an AES-GCM key from passphrase + random salt with PBKDF2 (or scrypt/Argon2id via WASM).
+* Encrypt/decrypt per-document fields client-side.
+
+### Data Envelope (versioned)
+
+```json
+{
+  "v": 1,
+  "alg": "AES-GCM",
+  "salt": "<base64>",
+  "iv": "<base64>",
+  "ct": "<base64-ciphertext>"
+}
+```
+
+### UX
+
+* User toggles **Lock Mode** → sets a passphrase (never sent to server).
+* We derive a key in memory; cache it per-session (optional persist in WebCrypto keystore via `crypto.subtle.wrapKey` with platform credentials).
+* **No recovery** if passphrase is lost.
+
+
+### Trade-offs
+
+* No server-side querying on encrypted fields (we can keep small derived non-sensitive indices if needed).
+* Key recovery is user responsibility.
+
+---
+
+## 🧭 Roadmap
+
+* [ ] Lock Mode (E2EE) as described above.
+* [ ] Multi-currency support.
+* [ ] Custom payoff schedule simulator (timeline + amortization).
+* [ ] CSV import wizard.
+* [ ] App Check (re-enable with Recaptcha v3 site key).
+* [ ] Theming & color-blind safe palettes.
+
+---
+
+## 🧩 Troubleshooting
+
+* **Google popup blocked** - falls back to redirect; ensure *Authorized domains* has `localhost` / `127.0.0.1`.
+* **Nothing happens** - check that `env.js` loads before `app.js` (Network tab).
+* **Stale UI** - unregister service worker and hard-reload.
+* **“Permission denied”** - recheck Firestore rules.
+
+---
+
+## 📄 License
+
+`MIT`
+
+---
+
+**Questions / ideas?** Open an issue or ping me—happy to iterate.
+
+---
+Built with ❤️ by Avijit Roy.
