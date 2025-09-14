@@ -1,6 +1,4 @@
-// app.js
-
-// ===== UI ELEMENTS =====
+// ====== UI ELEMENTS ======
 const form = document.getElementById('debt-form');
 const cardList = document.getElementById('card-list');
 const avalancheList = document.getElementById('avalanche-list');
@@ -14,7 +12,7 @@ const totalCreditLineDisplay = document.getElementById('total-credit-line');
 const totalMonthlyInterestDisplay = document.getElementById('total-monthly-interest');
 const accountsMeta = document.getElementById('accounts-meta');
 
-// auth UI
+// Auth / modal
 const authSection = document.getElementById('auth-section');
 const mainApp = document.getElementById('main-app');
 const googleSigninBtn = document.getElementById('google-signin-btn');
@@ -26,53 +24,69 @@ const modalTitle = document.getElementById('modal-title');
 const modalMessage = document.getElementById('modal-message');
 const modalCloseBtn = document.getElementById('modal-close-btn');
 
-// controls
+// Controls
 const sortBySelect = document.getElementById('sort-by');
 const sortDirBtn = document.getElementById('sort-dir');
 const utilViewSelect = document.getElementById('util-view');
 
-// balance transfer
-const btRunBtn = document.getElementById('bt-run');
+// Balance transfer optimizer & fields
+const btRunBtn     = document.getElementById('bt-run');
+const btResetBtn   = document.getElementById('bt-reset');         // optional (exists in latest HTML)
+const btTargetSelect = document.getElementById('bt-target-id');   // optional (new dropdown)
+const btTargetInput  = document.getElementById('bt-target-name'); // optional (legacy text input)
 
-// runtime state
 let db, auth, userId;
 let unsubscribe;
 let sortBy = sortBySelect?.value || 'name';
-let sortDir = sortDirBtn?.dataset.dir || 'desc'; // desc by default
+let sortDir = sortDirBtn?.dataset.dir || 'desc';
 let utilView = utilViewSelect?.value || 'bar';
-let editingId = null; // <- inline edit state
+let editingId = null;
 window.__latestCards = [];
 
+// ====== AUTH UI ======
+function setHeaderAuthUI(isSignedIn, displayName = '') {
+  if (!userDisplay || !signOutBtn) return;
+  if (isSignedIn) {
+    userDisplay.textContent = `Signed in as: ${displayName || 'Guest'}`;
+    signOutBtn.classList.remove('hidden');
+  } else {
+    userDisplay.textContent = '';
+    signOutBtn.classList.add('hidden');
+  }
+}
+// Ensure clean header on first load (before auth state arrives)
+setHeaderAuthUI(false);
+
+
+// ====== MODAL & TOAST ======
 function showModal(title, message) {
   modalTitle.textContent = title;
   modalMessage.textContent = message;
-  messageModal.classList.remove('hidden');
+  messageModal?.classList.remove('hidden');
 }
-modalCloseBtn.addEventListener('click', () => messageModal.classList.add('hidden'));
+modalCloseBtn?.addEventListener('click', () => messageModal?.classList.add('hidden'));
 
-// ===== Saved Confirmation =====
 function toast(message, duration = 1800) {
   const t = document.createElement('div');
   t.className = 'fixed bottom-4 right-4 z-[1100] bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-lg opacity-0 transition-opacity';
   t.textContent = message;
   document.body.appendChild(t);
-  requestAnimationFrame(() => {
-    t.classList.remove('opacity-0');
-    t.classList.add('opacity-90');
-  });
+  requestAnimationFrame(() => { t.classList.replace('opacity-0', 'opacity-90'); });
   setTimeout(() => {
-    t.classList.remove('opacity-90');
-    t.classList.add('opacity-0');
+    t.classList.replace('opacity-90', 'opacity-0');
     setTimeout(() => t.remove(), 300);
   }, duration);
 }
 
-// ===== FIREBASE (client) =====
+// ====== FIREBASE ======
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
 import { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import {
+  getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, getDoc,
+  enableIndexedDbPersistence
+} from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-// Replace with your config
+// Replace with your Firebase config
 const firebaseConfig = {
   apiKey: "AIzaSyDa7J_8oOotlrwgk89fDjeMRqgdRJTlYbw",
   authDomain: "personal-debt-tracker.firebaseapp.com",
@@ -90,19 +104,23 @@ function initFirebase() {
     auth = getAuth(app);
     db = getFirestore(app);
 
+    // Offline-first Firestore
+    enableIndexedDbPersistence(db).catch(() => { /* ignore multi-tab error */ });
+
     onAuthStateChanged(auth, (user) => {
-      if (user) {
+    if (user) {
         userId = user.uid;
-        authSection.classList.add('hidden');
-        mainApp.classList.remove('hidden');
-        userDisplay.textContent = `Signed in as: ${user.displayName || 'Guest'}`;
+        authSection?.classList.add('hidden');
+        mainApp?.classList.remove('hidden');
         authStatus.textContent = '';
+        setHeaderAuthUI(true, user.displayName);
         setupFirestoreListener(user.uid);
-      } else {
+    } else {
         userId = null;
-        authSection.classList.remove('hidden');
-        mainApp.classList.add('hidden');
-      }
+        authSection?.classList.remove('hidden');
+        mainApp?.classList.add('hidden');
+        setHeaderAuthUI(false);
+    }
     });
   } catch (err) {
     console.error("Firebase init failed:", err);
@@ -116,24 +134,17 @@ function setupFirestoreListener(uid) {
   unsubscribe = onSnapshot(cardsCollection, (snapshot) => {
     const fetchedCards = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
     window.__latestCards = fetchedCards.map(x => ({ ...x }));
-    // if the card we are editing was deleted, reset editing state
     if (editingId && !window.__latestCards.find(c => c.id === editingId)) editingId = null;
     renderAll(window.__latestCards);
   }, (error) => console.error("Firestore onSnapshot error:", error));
 }
 
-// ===== UTILITIES =====
+// ====== HELPERS ======
 const USD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+const fmtMoney = (n) => USD.format(+n || 0);
+const monthlyInterest = (balance, aprPct) => (!balance || !aprPct) ? 0 : (balance * (aprPct / 100)) / 12;
+const interestPer100 = (aprPct) => (!aprPct) ? 0 : monthlyInterest(100, aprPct);
 
-function fmtMoney(n) { return USD.format(+n || 0); }
-function monthlyInterest(balance, aprPct) {
-  if (!balance || !aprPct) return 0;
-  return (balance * (aprPct / 100)) / 12;
-}
-function interestPer100(aprPct) {
-  if (!aprPct) return 0;
-  return monthlyInterest(100, aprPct);
-}
 function computeTotals(cards) {
   let debt = 0, limit = 0, monthly = 0;
   for (const c of cards) {
@@ -156,9 +167,11 @@ function riskBadge(util) {
 function rankByInterestPer100(cards) {
   return cards
     .filter(c => (+c.balance || 0) > 0)
-    .map(c => ({ name: c.name, balance: +c.balance || 0, apr: +c.apr || 0, per100: interestPer100(+c.apr || 0) }))
+    .map(c => ({ name: c.name, id: c.id, balance: +c.balance || 0, apr: +c.apr || 0, per100: interestPer100(+c.apr || 0) }))
     .sort((a, b) => b.per100 - a.per100);
 }
+
+// FICO optics (threshold nudges + overall)
 function computeFicoHints(cards) {
   const thresholds = [80, 50, 30];
   let over80 = 0, over50 = 0, over30 = 0;
@@ -182,7 +195,6 @@ function computeFicoHints(cards) {
   }
   nudges.sort((a, b) => a.dollarsToDrop - b.dollarsToDrop);
 
-  // Overall minimum to reach global utilization goals:
   const { debt, limit } = computeTotals(cards);
   const to50Overall = Math.max(0, debt - 0.50 * limit);
   const to30Overall = Math.max(0, debt - 0.30 * limit);
@@ -190,14 +202,19 @@ function computeFicoHints(cards) {
   return { over80, over50, over30, nudges, sumTo80, sumTo50, sumTo30, to50Overall, to30Overall };
 }
 
-function planBalanceTransfer(cards, targetName, rawLimit, feePct, months, capPct) {
+// Balance transfer planner (now supports optional targetId)
+function planBalanceTransfer(cards, targetName, rawLimit, feePct, months, capPct, targetId) {
   const limit = Math.max(0, +rawLimit || 0);
   const fee = Math.max(0, (+feePct || 0) / 100);
   const introMonths = Math.max(0, +months || 0);
   const cap = capPct ? Math.max(0, Math.min(100, +capPct)) : null;
 
-  const target = cards.find(c => (c.name || '').trim().toLowerCase() === (targetName || '').trim().toLowerCase());
-  if (!target) return { error: 'Target 0% card not found by name.', moves: [] };
+  // Resolve target card by ID first, then by name
+  let target = targetId ? cards.find(c => c.id === targetId) : null;
+  if (!target && targetName) {
+    target = cards.find(c => (c.name || '').trim().toLowerCase() === targetName.trim().toLowerCase());
+  }
+  if (!target) return { error: 'Target 0% card not found.', moves: [] };
 
   const targetLimit = +target.creditLimit || 0;
   const targetBalance = +target.balance || 0;
@@ -211,7 +228,8 @@ function planBalanceTransfer(cards, targetName, rawLimit, feePct, months, capPct
   const maxRoom = Math.min(limit, maxRoomByLimit);
   if (maxRoom <= 0.01) return { error: 'No available room on 0% card (limit/cap reached).', moves: [] };
 
-  const ranked = rankByInterestPer100(cards).filter(r => r.name.trim().toLowerCase() !== target.name.trim().toLowerCase());
+  const ranked = rankByInterestPer100(cards)
+    .filter(r => r.id !== target.id && r.name.trim().toLowerCase() !== target.name.trim().toLowerCase());
 
   let remaining = maxRoom;
   const moves = [];
@@ -233,7 +251,7 @@ function planBalanceTransfer(cards, targetName, rawLimit, feePct, months, capPct
   return { target: target.name, capApplied: cap !== null ? cap : null, totalTransfer, totalMonthlySaved, totalIntroSaved, totalFees, netIntroSavings, moves };
 }
 
-// dynamic font size class for long names + single-line
+// Dynamic font size for long names (single line fit)
 function nameFontClass(name = '') {
   const len = (name || '').length;
   if (len <= 22) return 'text-base';
@@ -243,7 +261,7 @@ function nameFontClass(name = '') {
   return 'text-[0.80rem]';
 }
 
-// sorting
+// Sorting
 function sortCardsGeneric(cards) {
   const arr = [...cards];
   arr.sort((a, b) => {
@@ -268,8 +286,10 @@ function sortCardsGeneric(cards) {
   return arr;
 }
 
-// ===== RENDERERS =====
+// ====== RENDERERS ======
+
 function renderAll(cards) {
+  populateBtDropdown(cards);     // keep optimizer in sync (safe if dropdown not present)
   renderCards(cards);
   renderStrategy(cards, 'avalanche');
   renderStrategy(cards, 'snowball');
@@ -279,17 +299,17 @@ function renderAll(cards) {
 
 function renderCards(cards) {
   const { debt, limit, monthly, util } = computeTotals(cards);
-  totalDebtDisplay.textContent = fmtMoney(debt);
-  totalCreditLineDisplay.textContent = fmtMoney(limit);
-  totalMonthlyInterestDisplay.textContent = fmtMoney(monthly);
-  accountsMeta.textContent = cards.length ? `Overall Utilization: ${util.toFixed(1)}% • Accounts: ${cards.length}` : '';
+  if (totalDebtDisplay) totalDebtDisplay.textContent = fmtMoney(debt);
+  if (totalCreditLineDisplay) totalCreditLineDisplay.textContent = fmtMoney(limit);
+  if (totalMonthlyInterestDisplay) totalMonthlyInterestDisplay.textContent = fmtMoney(monthly);
+  if (accountsMeta) accountsMeta.textContent = cards.length ? `Overall Utilization: ${util.toFixed(1)}% • Accounts: ${cards.length}` : '';
 
   cardList.innerHTML = '';
   if (!cards.length) {
-    noCardsMessage.style.display = 'block';
+    if (noCardsMessage) noCardsMessage.style.display = 'block';
     return;
   }
-  noCardsMessage.style.display = 'none';
+  if (noCardsMessage) noCardsMessage.style.display = 'none';
 
   const sorted = sortCardsGeneric(cards);
   sorted.forEach(card => {
@@ -299,13 +319,13 @@ function renderCards(cards) {
     const monthlyInt = monthlyInterest(balance, apr);
     const utilization = computeCardUtilization(card);
     const utilColor = utilization <= 30 ? 'bg-emerald-500' : utilization <= 50 ? 'bg-amber-500' : 'bg-rose-500';
-
     const isEditing = editingId === card.id;
 
     const el = document.createElement('div');
     el.className = 'bg-white p-4 rounded-lg shadow-sm border border-gray-100';
+
     if (!isEditing) {
-      // ===== View Mode =====
+      // View Mode
       el.innerHTML = `
         <div class="flex items-start justify-between">
           <div class="min-w-0">
@@ -314,32 +334,30 @@ function renderCards(cards) {
             </h3>
             <div class="mt-1 grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-gray-600">
               <p>Balance: <span class="font-semibold text-gray-900">${fmtMoney(balance)}</span></p>
-              <p>APR: <span class="font-semibold text-gray-900">${apr.toFixed(2)}%</span></p>
+              <p>APR:
+                <span class="font-semibold text-gray-900">${apr.toFixed(2)}%</span>
+                ${apr <= 0.01 ? '<span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">0% APR</span>' : ''}
+              </p>
               <p>Limit: <span class="font-semibold text-gray-900">${fmtMoney(creditLimit)}</span></p>
               <p>Monthly Interest: <span class="font-semibold text-gray-900">${fmtMoney(monthlyInt)}</span></p>
             </div>
           </div>
-
-        <div class="flex gap-2 shrink-0">
-        <button
-            class="inline-edit-btn w-8 h-8 flex items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
-            data-id="${card.id}" title="Edit" aria-label="Edit">
-            <!-- pencil icon -->
-            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M15.232 5.232l3.536 3.536M4 20h4l10.5-10.5a2.5 2.5 0 10-3.536-3.536L4 16v4z"/>
-            </svg>
-        </button>
-
-        <button
-            class="delete-btn w-8 h-8 flex items-center justify-center rounded-full bg-rose-500 text-white hover:bg-rose-600 focus:outline-none focus:ring-2 focus:ring-rose-500 transition-colors"
-            data-id="${card.id}" title="Delete" aria-label="Delete">
-            <!-- trash icon -->
-            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M6 7h12M9 7V5a2 2 0 012-2h2a2 2 0 012 2v2m1 0v12a2 2 0 01-2 2H8a2 2 0 01-2-2V7"/>
-            </svg>
-        </button>
-        </div>
-
+          <div class="flex gap-2 shrink-0">
+            <button
+              class="inline-edit-btn w-9 h-9 flex items-center justify-center rounded-full bg-sky-600 text-white hover:bg-sky-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 transition-colors"
+              data-id="${card.id}" title="Edit" aria-label="Edit">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M15.232 5.232l3.536 3.536M4 20h4l10.5-10.5a2.5 2.5 0 10-3.536-3.536L4 16v4z"/>
+              </svg>
+            </button>
+            <button
+              class="delete-btn w-9 h-9 flex items-center justify-center rounded-full bg-rose-500 text-white hover:bg-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 transition-colors"
+              data-id="${card.id}" title="Delete" aria-label="Delete">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6 7h12M9 7V5a2 2 0 012-2h2a2 2 0 012 2v2m1 0v12a2 2 0 01-2 2H8a2 2 0 01-2-2V7"/>
+              </svg>
+            </button>
+          </div>
         </div>
 
         <div class="mt-3">
@@ -356,48 +374,46 @@ function renderCards(cards) {
         </div>
       `;
     } else {
-      // ===== Inline Edit Mode =====
+      // Inline Edit Mode
       el.innerHTML = `
         <div class="flex items-start justify-between">
           <div class="min-w-0">
             <h3 class="name-fit font-semibold text-gray-900 flex items-center whitespace-nowrap overflow-hidden text-ellipsis ${nameFontClass(card.name)}" title="${card.name}">
-              ${card.name} <span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">Editing</span>
+              ${card.name} <span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">Editing</span>
             </h3>
             <div class="mt-3 space-y-3 text-sm">
               <label class="block">
                 <span class="text-gray-600">Balance ($)</span>
-                <input data-field="balance" type="number" step="0.01" value="${balance}"
-                       class="w-full mt-1 px-2 py-1.5 border rounded-lg focus:ring-2 focus:ring-blue-500"/>
+                <input data-field="balance" type="number" step="0.01" min="0" value="${balance}"
+                       class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-sky-500"/>
               </label>
               <label class="block">
                 <span class="text-gray-600">APR (%)</span>
-                <input data-field="apr" type="number" step="0.01" value="${apr}"
-                       class="w-full mt-1 px-2 py-1.5 border rounded-lg focus:ring-2 focus:ring-blue-500"/>
+                <input data-field="apr" type="number" step="0.01" min="0" max="99.99" value="${apr}"
+                       class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-sky-500"/>
               </label>
               <label class="block">
                 <span class="text-gray-600">Limit ($)</span>
-                <input data-field="creditLimit" type="number" step="0.01" value="${creditLimit}"
-                       class="w-full mt-1 px-2 py-1.5 border rounded-lg focus:ring-2 focus:ring-blue-500"/>
+                <input data-field="creditLimit" type="number" step="0.01" min="0" value="${creditLimit}"
+                       class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-sky-500"/>
               </label>
               <label class="block">
                 <span class="text-gray-600">Name</span>
                 <input data-field="name" type="text" value="${card.name}"
-                       class="w-full mt-1 px-2 py-1.5 border rounded-lg focus:ring-2 focus:ring-blue-500"/>
+                       class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-sky-500"/>
               </label>
             </div>
           </div>
           <div class="flex gap-2 shrink-0">
-            <button class="save-inline-btn px-3 py-1.5 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors" data-id="${card.id}">Save</button>
-            <button class="cancel-inline-btn px-3 py-1.5 text-xs bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors" data-id="${card.id}">Cancel</button>
+            <button class="save-inline-btn px-3 py-1.5 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500" data-id="${card.id}">Save</button>
+            <button class="cancel-inline-btn px-3 py-1.5 text-xs bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors focus-visible:ring-2 focus-visible:ring-gray-400" data-id="${card.id}">Cancel</button>
           </div>
         </div>
-
         <div class="mt-3 text-xs text-gray-500">
-          Tip: Press <span class="font-semibold">Save</span> to update Firestore or <span class="font-semibold">Cancel</span> to discard.
+          Tip: Press <span class="font-semibold">Enter</span> to save or <span class="font-semibold">Esc</span> to cancel.
         </div>
       `;
     }
-
     cardList.appendChild(el);
   });
 }
@@ -410,7 +426,7 @@ function donut(util) {
   const color = util <= 30 ? '#10b981' : util <= 50 ? '#f59e0b' : '#ef4444';
   return `
     <div class="flex items-center gap-3">
-      <svg width="56" height="56" viewBox="0 0 48 48">
+      <svg width="56" height="56" viewBox="0 0 48 48" role="img" aria-label="Utilization donut">
         <circle cx="24" cy="24" r="${r}" stroke="#e5e7eb" stroke-width="6" fill="none"/>
         <circle cx="24" cy="24" r="${r}" stroke="${color}" stroke-width="6" fill="none"
                 stroke-dasharray="${filled} ${remaining}" transform="rotate(-90 24 24)"/>
@@ -426,6 +442,7 @@ function renderStrategy(cards, strategy) {
     ? [...cards].sort((a, b) => (+b.apr || 0) - (+a.apr || 0))
     : [...cards].sort((a, b) => (+a.balance || 0) - (+b.balance || 0));
 
+  if (!target) return;
   target.innerHTML = '';
   if (!cards.length) {
     target.innerHTML = '<p class="text-gray-500">Add accounts to see the payoff plan.</p>';
@@ -476,6 +493,7 @@ function renderExpensive(cards) {
 
 function renderFicoHints(cards) {
   const box = document.getElementById('fico-hints');
+  if (!box) return;
   box.innerHTML = '';
   if (!cards.length) {
     box.innerHTML = '<p class="text-gray-500">Add accounts to see utilization thresholds and “nudge” amounts.</p>';
@@ -529,14 +547,81 @@ function renderFicoHints(cards) {
   }
 }
 
-// ===== EVENTS =====
-form.addEventListener('submit', async (e) => {
+// ====== OPTIMIZER DROPDOWN ======
+function populateBtDropdown(cards) {
+  if (!btTargetSelect) return; // safe if HTML not updated
+
+  const prev = btTargetSelect.value;
+  btTargetSelect.innerHTML = '<option value="">-- Select 0% target card --</option>';
+
+  cards.forEach(c => {
+    const util = computeCardUtilization(c);
+    const apr  = +c.apr || 0;
+    const opt = document.createElement('option');
+    opt.value = c.id;
+    const zeroAprTag = (apr <= 0.01) ? ' • 0% APR' : '';
+    opt.textContent = `${c.name} • Bal ${fmtMoney(+c.balance || 0)} • Util ${util.toFixed(0)}%${zeroAprTag}`;
+    btTargetSelect.appendChild(opt);
+  });
+
+  // Keep prior selection if still present
+  if ([...btTargetSelect.options].some(o => o.value === prev)) {
+    btTargetSelect.value = prev;
+  }
+
+  // Auto-pick: prefer 0% APR card (largest limit if multiple), else most available room
+  if (!btTargetSelect.value) {
+    const zeroApr = cards.filter(c => ((+c.apr || 0) <= 0.01));
+    if (zeroApr.length === 1) {
+      btTargetSelect.value = zeroApr[0].id;
+    } else if (zeroApr.length > 1) {
+      zeroApr.sort((a, b) => (+b.creditLimit || 0) - (+a.creditLimit || 0));
+      btTargetSelect.value = zeroApr[0].id;
+    } else {
+      const byRoom = [...cards]
+        .map(c => ({ ...c, room: (+c.creditLimit || 0) - (+c.balance || 0) }))
+        .sort((a, b) => (b.room) - (a.room));
+      if (byRoom[0] && byRoom[0].room > 0) {
+        btTargetSelect.value = byRoom[0].id;
+      }
+    }
+  }
+}
+
+// ====== EXPORT (exposed for onclick in HTML) ======
+function downloadFile(name, type, data) {
+  const blob = new Blob([data], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name; a.click();
+  URL.revokeObjectURL(url);
+}
+function exportData(format = 'csv') {
+  const rows = window.__latestCards.map(c => ({
+    id: c.id, name: c.name, balance: +c.balance || 0, apr: +c.apr || 0, creditLimit: +c.creditLimit || 0
+  }));
+  if (format === 'json') {
+    downloadFile('debt-tracker.json', 'application/json', JSON.stringify(rows, null, 2));
+  } else {
+    const header = 'id,name,balance,apr,creditLimit';
+    const csv = [header, ...rows.map(r => `${r.id},"${(r.name||'').replace(/"/g,'""')}",${r.balance},${r.apr},${r.creditLimit}`)].join('\n');
+    downloadFile('debt-tracker.csv', 'text/csv', csv);
+  }
+}
+window.exportData = exportData; // make available to buttons in HTML
+
+// ====== EVENTS ======
+
+// Add / Update (top form)
+form?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const id = cardIdInput.value;
   const name = document.getElementById('card-name').value.trim();
-  const balance = parseFloat(document.getElementById('balance').value);
-  const apr = parseFloat(document.getElementById('apr').value);
-  const creditLimit = parseFloat(document.getElementById('limit').value);
+
+  // Guardrails
+  const balance = Math.max(0, parseFloat(document.getElementById('balance').value));
+  const apr     = Math.min(99.99, Math.max(0, parseFloat(document.getElementById('apr').value)));
+  const creditLimit = Math.max(0, parseFloat(document.getElementById('limit').value));
 
   if (!name || isNaN(balance) || isNaN(apr) || isNaN(creditLimit)) {
     showModal("Validation", "Please enter valid Name, Balance, APR, and Credit Limit.");
@@ -552,6 +637,7 @@ form.addEventListener('submit', async (e) => {
     toast(id ? 'Account updated' : 'Account added');
   } catch (err) {
     console.error("Add/Update failed:", err);
+    showModal('Error', 'Could not save the account.');
   }
 
   form.reset();
@@ -559,47 +645,44 @@ form.addEventListener('submit', async (e) => {
   submitBtn.textContent = 'Add Account';
 });
 
-// Inline edit actions + delete using event delegation
-cardList.addEventListener('click', async (e) => {
-  // Handle clicks on icons/SVGs too (bubble up to the button)
+// Inline edit actions + delete (event delegation)
+cardList?.addEventListener('click', async (e) => {
   const editBtn   = e.target.closest('.inline-edit-btn');
   const cancelBtn = e.target.closest('.cancel-inline-btn');
   const saveBtn   = e.target.closest('.save-inline-btn');
   const deleteBtn = e.target.closest('.delete-btn');
 
-  // ----- ENTER EDIT MODE -----
+  // Enter edit
   if (editBtn) {
     editingId = editBtn.dataset.id;
     renderCards(window.__latestCards);
     return;
   }
 
-  // ----- CANCEL EDIT MODE -----
+  // Cancel edit
   if (cancelBtn) {
     editingId = null;
     renderCards(window.__latestCards);
     return;
   }
 
-  // ----- SAVE INLINE EDIT -----
+  // Save inline
   if (saveBtn) {
     if (!userId) { showModal("Authentication", "Please sign in to edit accounts."); return; }
     const id = saveBtn.dataset.id;
     const cardEl = saveBtn.closest('.bg-white');
     if (!cardEl) return;
 
-    // Collect inline input values
     const getVal = (sel) => {
       const inp = cardEl.querySelector(`input[data-field="${sel}"]`);
       return inp ? inp.value : null;
     };
     const updated = {
-      balance: parseFloat(getVal('balance')),
-      apr: parseFloat(getVal('apr')),
-      creditLimit: parseFloat(getVal('creditLimit')),
+      balance: Math.max(0, parseFloat(getVal('balance'))),
+      apr: Math.min(99.99, Math.max(0, parseFloat(getVal('apr')))),
+      creditLimit: Math.max(0, parseFloat(getVal('creditLimit'))),
       name: (getVal('name') || '').trim()
     };
-
     if (!updated.name || isNaN(updated.balance) || isNaN(updated.apr) || isNaN(updated.creditLimit)) {
       showModal('Validation', 'Please provide valid values for Name, Balance, APR, and Limit.');
       return;
@@ -609,23 +692,17 @@ cardList.addEventListener('click', async (e) => {
     const prevHTML = saveBtn.innerHTML;
 
     try {
-      // prevent double clicks
       saveBtn.disabled = true;
       saveBtn.innerHTML = 'Saving…';
-
       await setDoc(doc(cardsCollection, id), updated);
 
-      // collapse editor + notify
       editingId = null;
       toast('Account updated');
 
-      // Optimistic local render so UI updates immediately
+      // Optimistic local render
       const idx = window.__latestCards.findIndex(c => c.id === id);
-      if (idx !== -1) {
-        window.__latestCards[idx] = { ...window.__latestCards[idx], ...updated };
-      }
+      if (idx !== -1) window.__latestCards[idx] = { ...window.__latestCards[idx], ...updated };
       renderCards(window.__latestCards);
-      // Firestore onSnapshot will still re-render with canonical data
 
     } catch (err) {
       console.error("Inline save failed:", err);
@@ -638,14 +715,42 @@ cardList.addEventListener('click', async (e) => {
     return;
   }
 
-  // ----- DELETE CARD -----
+  // Delete (with Undo)
   if (deleteBtn) {
     if (!userId) { showModal("Authentication", "Please sign in to delete accounts."); return; }
     const id = deleteBtn.dataset.id;
     const cardsCollection = collection(db, `artifacts/${appId}/users/${userId}/cards`);
+
+    const snapshot = window.__latestCards.find(c => c.id === id);
+    if (!snapshot) { return; }
+
     try {
       await deleteDoc(doc(cardsCollection, id));
-      toast('Account deleted');
+      let undone = false;
+
+      const undoEl = document.createElement('div');
+      undoEl.className = 'fixed bottom-4 right-4 z-[1100] bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-lg flex items-center gap-3';
+      undoEl.innerHTML = `<span>Account deleted</span>
+        <button class="px-2 py-1 bg-white text-gray-900 rounded hover:bg-gray-100 text-xs" id="undo-delete">Undo</button>`;
+      document.body.appendChild(undoEl);
+
+      const timer = setTimeout(() => { if (undoEl.isConnected) undoEl.remove(); }, 5000);
+
+      undoEl.querySelector('#undo-delete').addEventListener('click', async () => {
+        if (undone) return;
+        undone = true;
+        clearTimeout(timer);
+        if (undoEl.isConnected) undoEl.remove();
+
+        await setDoc(doc(cardsCollection, id), {
+          name: snapshot.name,
+          balance: snapshot.balance,
+          apr: snapshot.apr,
+          creditLimit: snapshot.creditLimit
+        });
+        toast('Delete undone');
+      });
+
     } catch (err) {
       console.error("Delete failed:", err);
       showModal('Error', 'Delete failed. Please try again.');
@@ -654,18 +759,37 @@ cardList.addEventListener('click', async (e) => {
   }
 });
 
-// controls
-sortBySelect.addEventListener('change', () => { sortBy = sortBySelect.value; renderCards(window.__latestCards); });
-sortDirBtn.addEventListener('click', () => {
+// Keyboard shortcuts (Enter=Save, Esc=Cancel)
+cardList?.addEventListener('keydown', (e) => {
+  const editingCard = e.target.closest('.bg-white');
+  if (!editingCard) return;
+  const saveBtn = editingCard.querySelector('.save-inline-btn');
+  const cancelBtn = editingCard.querySelector('.cancel-inline-btn');
+  if (!saveBtn || !cancelBtn) return;
+
+  if (e.key === 'Escape') {
+    cancelBtn.click();
+  } else if (e.key === 'Enter') {
+    const tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input') {
+      e.preventDefault();
+      saveBtn.click();
+    }
+  }
+});
+
+// Controls
+sortBySelect?.addEventListener('change', () => { sortBy = sortBySelect.value; renderCards(window.__latestCards); });
+sortDirBtn?.addEventListener('click', () => {
   sortDir = sortDirBtn.dataset.dir === 'asc' ? 'desc' : 'asc';
   sortDirBtn.dataset.dir = sortDir;
   sortDirBtn.textContent = sortDir === 'asc' ? 'Asc' : 'Desc';
   renderCards(window.__latestCards);
 });
-utilViewSelect.addEventListener('change', () => { utilView = utilViewSelect.value; renderCards(window.__latestCards); });
+utilViewSelect?.addEventListener('change', () => { utilView = utilViewSelect.value; renderCards(window.__latestCards); });
 
-// Google Sign-in/out
-googleSigninBtn.addEventListener('click', async () => {
+// Auth actions
+googleSigninBtn?.addEventListener('click', async () => {
   try {
     const provider = new GoogleAuthProvider();
     await signInWithPopup(auth, provider);
@@ -675,36 +799,52 @@ googleSigninBtn.addEventListener('click', async () => {
     else showModal("Sign-in Failed", "An error occurred during sign-in. Try again later.");
   }
 });
-signOutBtn.addEventListener('click', async () => {
+signOutBtn?.addEventListener('click', async () => {
   try {
     await signOut(auth);
-    noCardsMessage.style.display = 'block';
-    cardList.innerHTML = '';
-    totalDebtDisplay.textContent = `$0.00`;
-    totalCreditLineDisplay.textContent = `$0.00`;
-    totalMonthlyInterestDisplay.textContent = `$0.00`;
-    accountsMeta.textContent = '';
-    form.reset();
+    // Immediately clear UI; onAuthStateChanged will also run
+    setHeaderAuthUI(false);
+    noCardsMessage && (noCardsMessage.style.display = 'block');
+    cardList && (cardList.innerHTML = '');
+    totalDebtDisplay && (totalDebtDisplay.textContent = `$0.00`);
+    totalCreditLineDisplay && (totalCreditLineDisplay.textContent = `$0.00`);
+    totalMonthlyInterestDisplay && (totalMonthlyInterestDisplay.textContent = `$0.00`);
+    accountsMeta && (accountsMeta.textContent = '');
+    form?.reset();
     editingId = null;
   } catch (err) {
     console.error("Sign-out failed:", err);
   }
 });
 
-// Optimizer
-btRunBtn.addEventListener('click', () => {
-  const targetName = (document.getElementById('bt-target-name').value || '').trim();
-  const limit = +document.getElementById('bt-limit').value || 0;
-  const months = +document.getElementById('bt-months').value || 0;
-  const fee = +document.getElementById('bt-fee').value || 0;
-  const capVal = document.getElementById('bt-cap').value;
-  const cap = capVal ? +capVal : null;
+
+// Optimizer: Recommend
+btRunBtn?.addEventListener('click', () => {
+  // Target from dropdown first, then fallback to text input if present
+  const targetIdFromSelect = btTargetSelect?.value || '';
+  let targetName = '';
+  if (targetIdFromSelect) {
+    const targetCard = window.__latestCards.find(c => c.id === targetIdFromSelect);
+    targetName = targetCard?.name || '';
+  } else if (btTargetInput && btTargetInput.value.trim()) {
+    targetName = btTargetInput.value.trim();
+  } else {
+    showModal('Missing Target', 'Please select (or type) your 0% target card.');
+    return;
+  }
+
+  const limit  = +document.getElementById('bt-limit')?.value || 0;
+  const months = +document.getElementById('bt-months')?.value || 0;
+  const fee    = +document.getElementById('bt-fee')?.value || 0;
+  const capVal = document.getElementById('bt-cap')?.value;
+  const cap    = capVal ? +capVal : null;
 
   if (!userId) { showModal('Authentication', 'Please sign in to run the optimizer.'); return; }
   if (!window.__latestCards.length) { showModal('No Data', 'Please add accounts first.'); return; }
 
-  const result = planBalanceTransfer(window.__latestCards, targetName, limit, fee, months, cap);
+  const result = planBalanceTransfer(window.__latestCards, targetName, limit, fee, months, cap, targetIdFromSelect);
   const out = document.getElementById('bt-output');
+  if (!out) return;
   out.innerHTML = '';
 
   if (result.error) {
@@ -742,5 +882,25 @@ btRunBtn.addEventListener('click', () => {
   }
 });
 
-// boot
+// Optimizer: Reset
+btResetBtn?.addEventListener('click', () => {
+  if (btTargetSelect) btTargetSelect.value = '';
+  if (btTargetInput)  btTargetInput.value  = '';
+  ['bt-limit','bt-months','bt-fee','bt-cap'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  const out = document.getElementById('bt-output');
+  if (out) out.innerHTML = '<p class="text-gray-500">Enter details and click “Recommend Transfer”.</p>';
+  toast('Optimizer reset');
+});
+
+// PWA SW registration (optional; add /sw.js to enable app-shell caching)
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => { /* ignore if not present */ });
+  });
+}
+
+// ====== BOOT ======
 initFirebase();
