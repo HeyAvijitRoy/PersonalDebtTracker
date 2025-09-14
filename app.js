@@ -40,6 +40,7 @@ let unsubscribe;
 let sortBy = sortBySelect?.value || 'name';
 let sortDir = sortDirBtn?.dataset.dir || 'desc'; // desc by default
 let utilView = utilViewSelect?.value || 'bar';
+let editingId = null; // <- inline edit state
 window.__latestCards = [];
 
 function showModal(title, message) {
@@ -48,6 +49,23 @@ function showModal(title, message) {
   messageModal.classList.remove('hidden');
 }
 modalCloseBtn.addEventListener('click', () => messageModal.classList.add('hidden'));
+
+// ===== Saved Confirmation =====
+function toast(message, duration = 1800) {
+  const t = document.createElement('div');
+  t.className = 'fixed bottom-4 right-4 z-[1100] bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-lg opacity-0 transition-opacity';
+  t.textContent = message;
+  document.body.appendChild(t);
+  requestAnimationFrame(() => {
+    t.classList.remove('opacity-0');
+    t.classList.add('opacity-90');
+  });
+  setTimeout(() => {
+    t.classList.remove('opacity-90');
+    t.classList.add('opacity-0');
+    setTimeout(() => t.remove(), 300);
+  }, duration);
+}
 
 // ===== FIREBASE (client) =====
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
@@ -98,11 +116,16 @@ function setupFirestoreListener(uid) {
   unsubscribe = onSnapshot(cardsCollection, (snapshot) => {
     const fetchedCards = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
     window.__latestCards = fetchedCards.map(x => ({ ...x }));
-    renderAll(fetchedCards);
+    // if the card we are editing was deleted, reset editing state
+    if (editingId && !window.__latestCards.find(c => c.id === editingId)) editingId = null;
+    renderAll(window.__latestCards);
   }, (error) => console.error("Firestore onSnapshot error:", error));
 }
 
 // ===== UTILITIES =====
+const USD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+
+function fmtMoney(n) { return USD.format(+n || 0); }
 function monthlyInterest(balance, aprPct) {
   if (!balance || !aprPct) return 0;
   return (balance * (aprPct / 100)) / 12;
@@ -125,10 +148,10 @@ function computeCardUtilization(card) {
   return l > 0 ? (b / l) * 100 : 0;
 }
 function riskBadge(util) {
-  if (util > 80) return '<span class="ml-2 text-xs px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">>80% High</span>';
-  if (util > 50) return '<span class="ml-2 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">>50% Medium</span>';
-  if (util > 30) return '<span class="ml-2 text-xs px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700">>30% Watch</span>';
-  return '<span class="ml-2 text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Healthy</span>';
+  if (util > 80) return '<span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">>80% High</span>';
+  if (util > 50) return '<span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">>50% Medium</span>';
+  if (util > 30) return '<span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700">>30% Watch</span>';
+  return '<span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Healthy</span>';
 }
 function rankByInterestPer100(cards) {
   return cards
@@ -140,13 +163,16 @@ function computeFicoHints(cards) {
   const thresholds = [80, 50, 30];
   let over80 = 0, over50 = 0, over30 = 0;
   const nudges = [];
+  let sumTo80 = 0, sumTo50 = 0, sumTo30 = 0;
+
   for (const c of cards) {
     const bal = +c.balance || 0, lim = +c.creditLimit || 0;
     if (!lim || bal <= 0) continue;
     const util = (bal / lim) * 100;
-    if (util > 80) over80++;
-    if (util > 50) over50++;
-    if (util > 30) over30++;
+    if (util > 80) { over80++; sumTo80 += bal - (0.80 * lim); }
+    if (util > 50) { over50++; sumTo50 += bal - (0.50 * lim); }
+    if (util > 30) { over30++; sumTo30 += bal - (0.30 * lim); }
+
     const next = thresholds.find(t => util > t);
     if (next !== undefined) {
       const targetBal = (next / 100) * lim;
@@ -155,8 +181,15 @@ function computeFicoHints(cards) {
     }
   }
   nudges.sort((a, b) => a.dollarsToDrop - b.dollarsToDrop);
-  return { over80, over50, over30, nudges };
+
+  // Overall minimum to reach global utilization goals:
+  const { debt, limit } = computeTotals(cards);
+  const to50Overall = Math.max(0, debt - 0.50 * limit);
+  const to30Overall = Math.max(0, debt - 0.30 * limit);
+
+  return { over80, over50, over30, nudges, sumTo80, sumTo50, sumTo30, to50Overall, to30Overall };
 }
+
 function planBalanceTransfer(cards, targetName, rawLimit, feePct, months, capPct) {
   const limit = Math.max(0, +rawLimit || 0);
   const fee = Math.max(0, (+feePct || 0) / 100);
@@ -200,6 +233,16 @@ function planBalanceTransfer(cards, targetName, rawLimit, feePct, months, capPct
   return { target: target.name, capApplied: cap !== null ? cap : null, totalTransfer, totalMonthlySaved, totalIntroSaved, totalFees, netIntroSavings, moves };
 }
 
+// dynamic font size class for long names + single-line
+function nameFontClass(name = '') {
+  const len = (name || '').length;
+  if (len <= 22) return 'text-base';
+  if (len <= 28) return 'text-[0.95rem]';
+  if (len <= 34) return 'text-[0.90rem]';
+  if (len <= 40) return 'text-[0.85rem]';
+  return 'text-[0.80rem]';
+}
+
 // sorting
 function sortCardsGeneric(cards) {
   const arr = [...cards];
@@ -236,9 +279,9 @@ function renderAll(cards) {
 
 function renderCards(cards) {
   const { debt, limit, monthly, util } = computeTotals(cards);
-  totalDebtDisplay.textContent = `$${debt.toFixed(2)}`;
-  totalCreditLineDisplay.textContent = `$${limit.toFixed(2)}`;
-  totalMonthlyInterestDisplay.textContent = `$${monthly.toFixed(2)}`;
+  totalDebtDisplay.textContent = fmtMoney(debt);
+  totalCreditLineDisplay.textContent = fmtMoney(limit);
+  totalMonthlyInterestDisplay.textContent = fmtMoney(monthly);
   accountsMeta.textContent = cards.length ? `Overall Utilization: ${util.toFixed(1)}% • Accounts: ${cards.length}` : '';
 
   cardList.innerHTML = '';
@@ -257,40 +300,104 @@ function renderCards(cards) {
     const utilization = computeCardUtilization(card);
     const utilColor = utilization <= 30 ? 'bg-emerald-500' : utilization <= 50 ? 'bg-amber-500' : 'bg-rose-500';
 
+    const isEditing = editingId === card.id;
+
     const el = document.createElement('div');
     el.className = 'bg-white p-4 rounded-lg shadow-sm border border-gray-100';
-    el.innerHTML = `
-      <div class="flex items-start justify-between">
-        <div>
-          <h3 class="font-semibold text-gray-900 flex items-center">
-            ${card.name} ${riskBadge(utilization)}
-          </h3>
-          <div class="mt-1 grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-gray-600">
-            <p>Balance: <span class="font-semibold text-gray-900">$${balance.toFixed(2)}</span></p>
-            <p>APR: <span class="font-semibold text-gray-900">${apr.toFixed(2)}%</span></p>
-            <p>Limit: <span class="font-semibold text-gray-900">$${creditLimit.toFixed(2)}</span></p>
-            <p>Monthly Interest: <span class="font-semibold text-gray-900">$${monthlyInt.toFixed(2)}</span></p>
+    if (!isEditing) {
+      // ===== View Mode =====
+      el.innerHTML = `
+        <div class="flex items-start justify-between">
+          <div class="min-w-0">
+            <h3 class="name-fit font-semibold text-gray-900 flex items-center whitespace-nowrap overflow-hidden text-ellipsis ${nameFontClass(card.name)}" title="${card.name}">
+              ${card.name} ${riskBadge(utilization)}
+            </h3>
+            <div class="mt-1 grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-gray-600">
+              <p>Balance: <span class="font-semibold text-gray-900">${fmtMoney(balance)}</span></p>
+              <p>APR: <span class="font-semibold text-gray-900">${apr.toFixed(2)}%</span></p>
+              <p>Limit: <span class="font-semibold text-gray-900">${fmtMoney(creditLimit)}</span></p>
+              <p>Monthly Interest: <span class="font-semibold text-gray-900">${fmtMoney(monthlyInt)}</span></p>
+            </div>
+          </div>
+
+        <div class="flex gap-2 shrink-0">
+        <button
+            class="inline-edit-btn w-8 h-8 flex items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
+            data-id="${card.id}" title="Edit" aria-label="Edit">
+            <!-- pencil icon -->
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15.232 5.232l3.536 3.536M4 20h4l10.5-10.5a2.5 2.5 0 10-3.536-3.536L4 16v4z"/>
+            </svg>
+        </button>
+
+        <button
+            class="delete-btn w-8 h-8 flex items-center justify-center rounded-full bg-rose-500 text-white hover:bg-rose-600 focus:outline-none focus:ring-2 focus:ring-rose-500 transition-colors"
+            data-id="${card.id}" title="Delete" aria-label="Delete">
+            <!-- trash icon -->
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 7h12M9 7V5a2 2 0 012-2h2a2 2 0 012 2v2m1 0v12a2 2 0 01-2 2H8a2 2 0 01-2-2V7"/>
+            </svg>
+        </button>
+        </div>
+
+        </div>
+
+        <div class="mt-3">
+          <div class="flex items-center justify-between mb-1">
+            <p class="text-sm text-gray-700">Utilization: <span class="font-semibold">${utilization.toFixed(1)}%</span></p>
+            <p class="text-xs text-gray-400">View: ${utilView.toUpperCase()}</p>
+          </div>
+
+          ${utilView === 'pie' ? donut(utilization) : `
+            <div class="w-full bg-gray-200 rounded-full h-2.5">
+              <div class="${utilColor} h-2.5 rounded-full" style="width:${Math.min(100, utilization)}%"></div>
+            </div>
+          `}
+        </div>
+      `;
+    } else {
+      // ===== Inline Edit Mode =====
+      el.innerHTML = `
+        <div class="flex items-start justify-between">
+          <div class="min-w-0">
+            <h3 class="name-fit font-semibold text-gray-900 flex items-center whitespace-nowrap overflow-hidden text-ellipsis ${nameFontClass(card.name)}" title="${card.name}">
+              ${card.name} <span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">Editing</span>
+            </h3>
+            <div class="mt-3 space-y-3 text-sm">
+              <label class="block">
+                <span class="text-gray-600">Balance ($)</span>
+                <input data-field="balance" type="number" step="0.01" value="${balance}"
+                       class="w-full mt-1 px-2 py-1.5 border rounded-lg focus:ring-2 focus:ring-blue-500"/>
+              </label>
+              <label class="block">
+                <span class="text-gray-600">APR (%)</span>
+                <input data-field="apr" type="number" step="0.01" value="${apr}"
+                       class="w-full mt-1 px-2 py-1.5 border rounded-lg focus:ring-2 focus:ring-blue-500"/>
+              </label>
+              <label class="block">
+                <span class="text-gray-600">Limit ($)</span>
+                <input data-field="creditLimit" type="number" step="0.01" value="${creditLimit}"
+                       class="w-full mt-1 px-2 py-1.5 border rounded-lg focus:ring-2 focus:ring-blue-500"/>
+              </label>
+              <label class="block">
+                <span class="text-gray-600">Name</span>
+                <input data-field="name" type="text" value="${card.name}"
+                       class="w-full mt-1 px-2 py-1.5 border rounded-lg focus:ring-2 focus:ring-blue-500"/>
+              </label>
+            </div>
+          </div>
+          <div class="flex gap-2 shrink-0">
+            <button class="save-inline-btn px-3 py-1.5 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors" data-id="${card.id}">Save</button>
+            <button class="cancel-inline-btn px-3 py-1.5 text-xs bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors" data-id="${card.id}">Cancel</button>
           </div>
         </div>
-        <div class="flex gap-2">
-          <button class="edit-btn px-3 py-1.5 text-xs bg-amber-200 text-amber-900 rounded-lg hover:bg-amber-300 transition-colors" data-id="${card.id}">Edit</button>
-          <button class="delete-btn px-3 py-1.5 text-xs bg-rose-500 text-white rounded-lg hover:bg-rose-600 transition-colors" data-id="${card.id}">Delete</button>
-        </div>
-      </div>
 
-      <div class="mt-3">
-        <div class="flex items-center justify-between mb-1">
-          <p class="text-sm text-gray-700">Utilization: <span class="font-semibold">${utilization.toFixed(1)}%</span></p>
-          <p class="text-xs text-gray-400">View: ${utilView.toUpperCase()}</p>
+        <div class="mt-3 text-xs text-gray-500">
+          Tip: Press <span class="font-semibold">Save</span> to update Firestore or <span class="font-semibold">Cancel</span> to discard.
         </div>
+      `;
+    }
 
-        ${utilView === 'pie' ? donut(utilization) : `
-          <div class="w-full bg-gray-200 rounded-full h-2.5">
-            <div class="${utilColor} h-2.5 rounded-full" style="width:${Math.min(100, utilization)}%"></div>
-          </div>
-        `}
-      </div>
-    `;
     cardList.appendChild(el);
   });
 }
@@ -329,14 +436,13 @@ function renderStrategy(cards, strategy) {
     el.className = 'p-3 bg-white rounded-md shadow-sm border border-gray-200';
     el.innerHTML = `
       <div class="flex items-center justify-between">
-        <div class="flex items-center">
+        <div class="flex items-center min-w-0">
           <span class="text-lg font-bold text-gray-600 w-6">${idx + 1}.</span>
-          <div class="ml-2">
-            <span class="font-medium text-gray-900">${card.name}</span>
-            <p class="text-xs text-gray-500">Balance: $${(+card.balance).toFixed(2)} • APR: ${(+card.apr).toFixed(2)}%</p>
-          </div>
+          <p class="ml-2 font-medium text-gray-900 whitespace-nowrap overflow-hidden text-ellipsis ${nameFontClass(card.name)}" title="${card.name}">
+            ${card.name}
+          </p>
         </div>
-        <span class="text-[11px] text-gray-500">Util ${computeCardUtilization(card).toFixed(0)}%</span>
+        <p class="text-xs text-gray-500">Bal ${fmtMoney(+card.balance || 0)} • APR ${(+card.apr || 0).toFixed(2)}% • Util ${computeCardUtilization(card).toFixed(0)}%</p>
       </div>
     `;
     target.appendChild(el);
@@ -344,6 +450,7 @@ function renderStrategy(cards, strategy) {
 }
 
 function renderExpensive(cards) {
+  if (!expensiveList) return;
   const ranked = rankByInterestPer100(cards);
   expensiveList.innerHTML = '';
   if (!ranked.length) {
@@ -354,14 +461,14 @@ function renderExpensive(cards) {
     const row = document.createElement('div');
     row.className = 'p-3 bg-white rounded-md shadow-sm border border-gray-200 flex items-center justify-between';
     row.innerHTML = `
-      <div class="flex items-center">
+      <div class="flex items-center min-w-0">
         <span class="text-lg font-bold text-gray-600 w-6">${i + 1}.</span>
-        <div class="ml-2">
-          <p class="font-medium text-gray-900">${r.name}</p>
-          <p class="text-xs text-gray-500">APR ${r.apr.toFixed(2)}% • Balance $${r.balance.toFixed(2)}</p>
+        <div class="ml-2 min-w-0">
+          <p class="font-medium text-gray-900 whitespace-nowrap overflow-hidden text-ellipsis ${nameFontClass(r.name)}" title="${r.name}">${r.name}</p>
+          <p class="text-xs text-gray-500">APR ${r.apr.toFixed(2)}% • Balance ${fmtMoney(r.balance)}</p>
         </div>
       </div>
-      <span class="text-sm font-semibold text-rose-700">$${r.per100.toFixed(2)}/$100</span>
+      <span class="text-sm font-semibold text-rose-700">${fmtMoney(r.per100)}/$100</span>
     `;
     expensiveList.appendChild(row);
   });
@@ -375,17 +482,27 @@ function renderFicoHints(cards) {
     return;
   }
   const { util } = computeTotals(cards);
-  const { over80, over50, over30, nudges } = computeFicoHints(cards);
+  const { over80, over50, over30, nudges, sumTo80, sumTo50, sumTo30, to50Overall, to30Overall } = computeFicoHints(cards);
 
   const summary = document.createElement('div');
   summary.className = 'p-3 bg-white rounded-md shadow-sm border border-gray-200';
   summary.innerHTML = `
     <p><span class="font-medium">Overall Utilization:</span> ${util.toFixed(1)}%</p>
-    <p class="mt-1">Cards >80%:
-      <span class="font-semibold ${over80 ? 'text-rose-600' : 'text-emerald-600'}">${over80}</span> •
-      >50%: <span class="font-semibold ${over50 ? 'text-amber-600' : 'text-emerald-600'}">${over50}</span> •
-      >30%: <span class="font-semibold ${over30 ? 'text-yellow-600' : 'text-emerald-600'}">${over30}</span>
+    <p class="mt-1 flex flex-wrap gap-x-4 gap-y-1 items-center">
+      <span>Cards >80%:
+        <span class="font-semibold ${over80 ? 'text-rose-600' : 'text-emerald-600'}">${over80}</span>
+        <span class="ml-2 text-xs text-gray-500">Min to tame: ${fmtMoney(sumTo80)}</span>
+      </span>
+      <span>>50%:
+        <span class="font-semibold ${over50 ? 'text-amber-600' : 'text-emerald-600'}">${over50}</span>
+        <span class="ml-2 text-xs text-gray-500">Min to tame: ${fmtMoney(sumTo50)}</span>
+      </span>
+      <span>>30%:
+        <span class="font-semibold ${over30 ? 'text-yellow-600' : 'text-emerald-600'}">${over30}</span>
+        <span class="ml-2 text-xs text-gray-500">Min to tame: ${fmtMoney(sumTo30)}</span>
+      </span>
     </p>
+    <p class="mt-1 text-xs text-gray-500">Overall dollars to reach target utilization — to 50%: <span class="font-semibold text-gray-700">${fmtMoney(to50Overall)}</span> • to 30%: <span class="font-semibold text-gray-700">${fmtMoney(to30Overall)}</span></p>
   `;
   box.appendChild(summary);
 
@@ -397,10 +514,10 @@ function renderFicoHints(cards) {
     title.textContent = 'Cheapest “threshold nudges” (FICO optics):';
     list.appendChild(title);
 
-    nudges.slice(0, 6).forEach(n => {
+    nudges.slice(0, 8).forEach(n => {
       const chip = document.createElement('span');
       chip.className = 'text-xs px-2 py-1 rounded-full border bg-white';
-      chip.textContent = `${n.name}: ${n.currentUtil.toFixed(1)}% → ${n.nextThreshold}% • Pay $${n.dollarsToDrop.toFixed(2)}`;
+      chip.textContent = `${n.name}: ${n.currentUtil.toFixed(1)}% → ${n.nextThreshold}% • Pay ${fmtMoney(n.dollarsToDrop)}`;
       list.appendChild(chip);
     });
     box.appendChild(list);
@@ -432,6 +549,7 @@ form.addEventListener('submit', async (e) => {
     const data = { name, balance, apr, creditLimit };
     if (id) await setDoc(doc(cardsCollection, id), data);
     else    await setDoc(doc(cardsCollection), data);
+    toast(id ? 'Account updated' : 'Account added');
   } catch (err) {
     console.error("Add/Update failed:", err);
   }
@@ -441,29 +559,98 @@ form.addEventListener('submit', async (e) => {
   submitBtn.textContent = 'Add Account';
 });
 
+// Inline edit actions + delete using event delegation
 cardList.addEventListener('click', async (e) => {
-  const id = e.target.dataset.id;
-  if (e.target.classList.contains('delete-btn')) {
-    if (!userId) { showModal("Authentication", "Please sign in to delete accounts."); return; }
-    const cardsCollection = collection(db, `artifacts/${appId}/users/${userId}/cards`);
-    try { await deleteDoc(doc(cardsCollection, id)); } catch (err) { console.error("Delete failed:", err); }
-  } else if (e.target.classList.contains('edit-btn')) {
+  // Handle clicks on icons/SVGs too (bubble up to the button)
+  const editBtn   = e.target.closest('.inline-edit-btn');
+  const cancelBtn = e.target.closest('.cancel-inline-btn');
+  const saveBtn   = e.target.closest('.save-inline-btn');
+  const deleteBtn = e.target.closest('.delete-btn');
+
+  // ----- ENTER EDIT MODE -----
+  if (editBtn) {
+    editingId = editBtn.dataset.id;
+    renderCards(window.__latestCards);
+    return;
+  }
+
+  // ----- CANCEL EDIT MODE -----
+  if (cancelBtn) {
+    editingId = null;
+    renderCards(window.__latestCards);
+    return;
+  }
+
+  // ----- SAVE INLINE EDIT -----
+  if (saveBtn) {
     if (!userId) { showModal("Authentication", "Please sign in to edit accounts."); return; }
+    const id = saveBtn.dataset.id;
+    const cardEl = saveBtn.closest('.bg-white');
+    if (!cardEl) return;
+
+    // Collect inline input values
+    const getVal = (sel) => {
+      const inp = cardEl.querySelector(`input[data-field="${sel}"]`);
+      return inp ? inp.value : null;
+    };
+    const updated = {
+      balance: parseFloat(getVal('balance')),
+      apr: parseFloat(getVal('apr')),
+      creditLimit: parseFloat(getVal('creditLimit')),
+      name: (getVal('name') || '').trim()
+    };
+
+    if (!updated.name || isNaN(updated.balance) || isNaN(updated.apr) || isNaN(updated.creditLimit)) {
+      showModal('Validation', 'Please provide valid values for Name, Balance, APR, and Limit.');
+      return;
+    }
+
+    const cardsCollection = collection(db, `artifacts/${appId}/users/${userId}/cards`);
+    const prevHTML = saveBtn.innerHTML;
+
+    try {
+      // prevent double clicks
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = 'Saving…';
+
+      await setDoc(doc(cardsCollection, id), updated);
+
+      // collapse editor + notify
+      editingId = null;
+      toast('Account updated');
+
+      // Optimistic local render so UI updates immediately
+      const idx = window.__latestCards.findIndex(c => c.id === id);
+      if (idx !== -1) {
+        window.__latestCards[idx] = { ...window.__latestCards[idx], ...updated };
+      }
+      renderCards(window.__latestCards);
+      // Firestore onSnapshot will still re-render with canonical data
+
+    } catch (err) {
+      console.error("Inline save failed:", err);
+      showModal('Error', 'Saving failed. Please try again.');
+      if (saveBtn.isConnected) {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = prevHTML;
+      }
+    }
+    return;
+  }
+
+  // ----- DELETE CARD -----
+  if (deleteBtn) {
+    if (!userId) { showModal("Authentication", "Please sign in to delete accounts."); return; }
+    const id = deleteBtn.dataset.id;
     const cardsCollection = collection(db, `artifacts/${appId}/users/${userId}/cards`);
     try {
-      const snap = await getDoc(doc(cardsCollection, id));
-      if (snap.exists()) {
-        const d = snap.data();
-        document.getElementById('card-id').value = id;
-        document.getElementById('card-name').value = d.name;
-        document.getElementById('balance').value = d.balance;
-        document.getElementById('apr').value = d.apr;
-        document.getElementById('limit').value = d.creditLimit;
-        submitBtn.textContent = 'Update Account';
-      }
+      await deleteDoc(doc(cardsCollection, id));
+      toast('Account deleted');
     } catch (err) {
-      console.error("Edit fetch failed:", err);
+      console.error("Delete failed:", err);
+      showModal('Error', 'Delete failed. Please try again.');
     }
+    return;
   }
 });
 
@@ -498,6 +685,7 @@ signOutBtn.addEventListener('click', async () => {
     totalMonthlyInterestDisplay.textContent = `$0.00`;
     accountsMeta.textContent = '';
     form.reset();
+    editingId = null;
   } catch (err) {
     console.error("Sign-out failed:", err);
   }
@@ -528,10 +716,10 @@ btRunBtn.addEventListener('click', () => {
   hdr.className = 'p-3 bg-white rounded-md border border-gray-200';
   hdr.innerHTML = `
     <p class="font-medium">Target: ${result.target}${result.capApplied !== null ? ` (cap ${result.capApplied}%)` : ''}</p>
-    <p>Total Transfer: <span class="font-semibold">$${result.totalTransfer.toFixed(2)}</span></p>
-    <p>Monthly Interest Saved: <span class="font-semibold">$${result.totalMonthlySaved.toFixed(2)}</span></p>
-    <p>Intro Savings (months ${months}) vs Fees: <span class="font-semibold">$${result.totalIntroSaved.toFixed(2)} saved • $${result.totalFees.toFixed(2)} fees</span></p>
-    <p class="${result.netIntroSavings >= 0 ? 'text-emerald-700' : 'text-rose-700'}">Net Savings Over Intro: <span class="font-semibold">$${result.netIntroSavings.toFixed(2)}</span></p>
+    <p>Total Transfer: <span class="font-semibold">${fmtMoney(result.totalTransfer)}</span></p>
+    <p>Monthly Interest Saved: <span class="font-semibold">${fmtMoney(result.totalMonthlySaved)}</span></p>
+    <p>Intro Savings (months ${months}) vs Fees: <span class="font-semibold">${fmtMoney(result.totalIntroSaved)} saved • ${fmtMoney(result.totalFees)} fees</span></p>
+    <p class="${result.netIntroSavings >= 0 ? 'text-emerald-700' : 'text-rose-700'}">Net Savings Over Intro: <span class="font-semibold">${fmtMoney(result.netIntroSavings)}</span></p>
   `;
   out.appendChild(hdr);
 
@@ -542,9 +730,9 @@ btRunBtn.addEventListener('click', () => {
       const row = document.createElement('div');
       row.className = 'text-sm p-2 bg-white rounded border border-gray-200';
       row.innerHTML = `
-        <span class="font-medium">${i + 1}.</span> Move $${m.amount.toFixed(2)} from <span class="font-semibold">${m.from}</span>
-        (APR ${m.apr.toFixed(2)}%) • Est monthly saved ~$${m.estMonthlySaved.toFixed(2)}
-        ${months ? ` • Intro saved ~$${m.estIntroSaved.toFixed(2)}` : ''} • Fee ~$${m.feeCost.toFixed(2)}
+        <span class="font-medium">${i + 1}.</span> Move ${fmtMoney(m.amount)} from <span class="font-semibold">${m.from}</span>
+        (APR ${m.apr.toFixed(2)}%) • Est monthly saved ~${fmtMoney(m.estMonthlySaved)}
+        ${months ? ` • Intro saved ~${fmtMoney(m.estIntroSaved)}` : ''} • Fee ~${fmtMoney(m.feeCost)}
       `;
       list.appendChild(row);
     });

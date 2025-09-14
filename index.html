@@ -7,9 +7,12 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
   <style>
+    html { scroll-behavior: smooth; }
     body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; color: #1f2937; }
     .modal-overlay { position: fixed; inset:0; background-color: rgba(0,0,0,0.5); display:flex; justify-content:center; align-items:center; z-index:1000; }
     .modal-content { background:#fff; padding:2rem; border-radius:0.75rem; box-shadow:0 4px 6px rgba(0,0,0,0.1); max-width:90%; width:420px; }
+    /* One-line name container; JS will shrink font-size to fit */
+    .name-fit { max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display:inline-block; }
   </style>
 </head>
 <body class="p-4 sm:p-8 md:p-12 lg:p-16">
