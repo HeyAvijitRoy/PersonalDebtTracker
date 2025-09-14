@@ -1,440 +1,181 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Personal Debt Tracker</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f3f4f6;
-            color: #1f2937;
-        }
-
-        .modal-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
-        }
-
-        .modal-content {
-            background-color: white;
-            padding: 2rem;
-            border-radius: 0.75rem;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            max-width: 90%;
-            width: 400px;
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Personal Debt Tracker</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+  <style>
+    body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; color: #1f2937; }
+    .modal-overlay { position: fixed; top:0; left:0; width:100%; height:100%;
+      background-color: rgba(0,0,0,0.5); display:flex; justify-content:center; align-items:center; z-index:1000; }
+    .modal-content { background-color:#fff; padding:2rem; border-radius:0.75rem; box-shadow:0 4px 6px rgba(0,0,0,0.1); max-width:90%; width:400px; }
+  </style>
 </head>
 <body class="p-4 sm:p-8 md:p-12 lg:p-16">
-    <div class="max-w-4xl mx-auto bg-white p-6 sm:p-8 md:p-10 rounded-xl shadow-lg">
-        <!-- Auth UI -->
-        <div id="auth-section" class="text-center mb-8">
-            <h2 class="text-2xl font-bold mb-4">Sign in to Save Your Data</h2>
-            <button id="google-signin-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition-colors shadow-md">
-                Sign in with Google
+  <div class="max-w-4xl mx-auto bg-white p-6 sm:p-8 md:p-10 rounded-xl shadow-lg">
+    <!-- Auth UI -->
+    <div id="auth-section" class="text-center mb-8">
+      <h2 class="text-2xl font-bold mb-4">Sign in to Save Your Data</h2>
+      <button id="google-signin-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition-colors shadow-md">
+        Sign in with Google
+      </button>
+      <p id="auth-status" class="mt-4 text-sm text-gray-500"></p>
+    </div>
+
+    <!-- Main App UI -->
+    <div id="main-app" class="hidden">
+      <div class="flex justify-between items-center mb-6">
+        <h1 class="text-3xl sm:text-4xl font-bold text-gray-800">Debt Payoff Planner</h1>
+        <div class="flex items-center space-x-2">
+          <span id="user-display" class="text-sm text-gray-600"></span>
+          <button id="sign-out-btn" class="text-sm text-red-500 hover:text-red-700 transition-colors">Sign Out</button>
+        </div>
+      </div>
+      <p class="text-center text-gray-600 mb-8">Manage your credit card debts and determine the best payoff strategy.</p>
+
+      <!-- Input Form -->
+      <div class="bg-gray-50 p-6 rounded-lg mb-8 shadow-sm">
+        <h2 class="text-xl font-semibold mb-4 text-gray-800">Add or Edit Account</h2>
+        <form id="debt-form" class="space-y-4">
+          <input type="hidden" id="card-id" />
+          <div>
+            <label for="card-name" class="block text-sm font-medium text-gray-700 mb-1">Account Name</label>
+            <input id="card-name" type="text" placeholder="e.g., Visa Card" required
+                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"/>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div>
+              <label for="balance" class="block text-sm font-medium text-gray-700 mb-1">Current Balance ($)</label>
+              <input id="balance" type="number" placeholder="1000" required step="0.01"
+                     class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"/>
+            </div>
+            <div>
+              <label for="apr" class="block text-sm font-medium text-gray-700 mb-1">APR (%)</label>
+              <input id="apr" type="number" placeholder="24.99" required step="0.01"
+                     class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"/>
+            </div>
+            <div>
+              <label for="limit" class="block text-sm font-medium text-gray-700 mb-1">Credit Limit ($)</label>
+              <input id="limit" type="number" placeholder="5000" required step="0.01"
+                     class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"/>
+            </div>
+          </div>
+          <button type="submit" id="submit-btn"
+                  class="w-full px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors duration-200 shadow-md">
+            Add Account
+          </button>
+        </form>
+      </div>
+
+      <!-- Accounts List -->
+      <div class="bg-gray-50 p-6 rounded-lg mb-8 shadow-sm">
+        <h2 class="text-xl font-semibold mb-4 text-gray-800">My Accounts</h2>
+        <div id="summary" class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center font-bold text-lg mb-4 text-gray-700">
+          <p>Total Debt: <span id="total-debt"></span></p>
+          <p>Total Credit Line: <span id="total-credit-line"></span></p>
+          <p>Total Monthly Interest: <span id="total-monthly-interest"></span></p>
+        </div>
+        <div id="card-list" class="space-y-4">
+          <p class="text-center text-gray-500" id="no-cards-message">No accounts added yet.</p>
+        </div>
+      </div>
+
+      <!-- Credit Score Hints (NEW) -->
+      <div class="bg-gray-50 p-6 rounded-lg mb-8 shadow-sm">
+        <h2 class="text-xl font-semibold mb-4 text-gray-800">Credit Score Hints</h2>
+        <div id="fico-hints" class="space-y-2 text-sm text-gray-700">
+          <p class="text-gray-500">Add accounts to see utilization thresholds and “nudge” amounts.</p>
+        </div>
+      </div>
+
+      <!-- Strategies + Optimizer -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+        <!-- Avalanche -->
+        <div class="bg-gray-50 p-6 rounded-lg shadow-sm">
+          <h2 class="text-xl font-semibold mb-4 text-gray-800 flex items-center">
+            <span class="mr-2">Debt Avalanche</span>
+            <span class="text-sm font-normal text-gray-500">(Highest APR First)</span>
+          </h2>
+          <div id="avalanche-list" class="space-y-2">
+            <p class="text-gray-500">Add accounts to see the payoff plan.</p>
+          </div>
+        </div>
+
+        <!-- Snowball -->
+        <div class="bg-gray-50 p-6 rounded-lg shadow-sm">
+          <h2 class="text-xl font-semibold mb-4 text-gray-800 flex items-center">
+            <span class="mr-2">Debt Snowball</span>
+            <span class="text-sm font-normal text-gray-500">(Lowest Balance First)</span>
+          </h2>
+          <div id="snowball-list" class="space-y-2">
+            <p class="text-gray-500">Add accounts to see the payoff plan.</p>
+          </div>
+        </div>
+
+        <!-- Balance Transfer Optimizer (NEW) -->
+        <div class="bg-gray-50 p-6 rounded-lg shadow-sm">
+          <h2 class="text-xl font-semibold mb-4 text-gray-800 flex items-center">
+            <span class="mr-2">Balance-Transfer Optimizer</span>
+            <span class="text-sm font-normal text-gray-500">(0% APR planner)</span>
+          </h2>
+          <div class="space-y-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-sm text-gray-700 mb-1">0% Target Card Name</label>
+                <input id="bt-target-name" type="text" placeholder="e.g., Citi Double Cash"
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"/>
+              </div>
+              <div>
+                <label class="block text-sm text-gray-700 mb-1">0% Limit ($)</label>
+                <input id="bt-limit" type="number" step="0.01" placeholder="1100"
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"/>
+              </div>
+              <div>
+                <label class="block text-sm text-gray-700 mb-1">Intro Months</label>
+                <input id="bt-months" type="number" step="1" placeholder="18"
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"/>
+              </div>
+              <div>
+                <label class="block text-sm text-gray-700 mb-1">Transfer Fee (%)</label>
+                <input id="bt-fee" type="number" step="0.01" placeholder="3"
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"/>
+              </div>
+              <div>
+                <label class="block text-sm text-gray-700 mb-1">Cap Utilization on 0% Card (%)</label>
+                <input id="bt-cap" type="number" step="1" placeholder="80"
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"/>
+                <p class="text-xs text-gray-500 mt-1">Leave blank to allow maxing; 80 avoids “maxed card” penalty.</p>
+              </div>
+            </div>
+
+            <button id="bt-run" class="w-full px-4 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors">
+              Recommend Transfer
             </button>
-            <p id="auth-status" class="mt-4 text-sm text-gray-500"></p>
+
+            <div id="bt-output" class="mt-3 space-y-2 text-sm text-gray-700">
+              <p class="text-gray-500">Enter details and click “Recommend Transfer”.</p>
+            </div>
+          </div>
         </div>
-
-        <!-- Main App UI (hidden by default) -->
-        <div id="main-app" class="hidden">
-            <div class="flex justify-between items-center mb-6">
-                <h1 class="text-3xl sm:text-4xl font-bold text-gray-800">Debt Payoff Planner</h1>
-                <div class="flex items-center space-x-2">
-                    <span id="user-display" class="text-sm text-gray-600"></span>
-                    <button id="sign-out-btn" class="text-sm text-red-500 hover:text-red-700 transition-colors">Sign Out</button>
-                </div>
-            </div>
-            <p class="text-center text-gray-600 mb-8">
-                Manage your credit card debts and determine the best payoff strategy.
-            </p>
-
-            <!-- Input Form -->
-            <div class="bg-gray-50 p-6 rounded-lg mb-8 shadow-sm">
-                <h2 class="text-xl font-semibold mb-4 text-gray-800">Add or Edit Account</h2>
-                <form id="debt-form" class="space-y-4">
-                    <input type="hidden" id="card-id">
-                    <div>
-                        <label for="card-name" class="block text-sm font-medium text-gray-700 mb-1">Account Name</label>
-                        <input type="text" id="card-name" placeholder="e.g., Visa Card" required class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                    </div>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                        <div>
-                            <label for="balance" class="block text-sm font-medium text-gray-700 mb-1">Current Balance ($)</label>
-                            <input type="number" id="balance" placeholder="1000" required step="0.01" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                        </div>
-                        <div>
-                            <label for="apr" class="block text-sm font-medium text-gray-700 mb-1">APR (%)</label>
-                            <input type="number" id="apr" placeholder="24.99" required step="0.01" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                        </div>
-                        <div>
-                            <label for="limit" class="block text-sm font-medium text-gray-700 mb-1">Credit Limit ($)</label>
-                            <input type="number" id="limit" placeholder="5000" required step="0.01" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                        </div>
-                    </div>
-                    <button type="submit" id="submit-btn" class="w-full px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors duration-200 shadow-md">Add Account</button>
-                </form>
-            </div>
-
-            <!-- Accounts List -->
-            <div class="bg-gray-50 p-6 rounded-lg mb-8 shadow-sm">
-                <h2 class="text-xl font-semibold mb-4 text-gray-800">My Accounts</h2>
-                <div id="summary" class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center font-bold text-lg mb-4 text-gray-700">
-                    <p>Total Debt: <span id="total-debt"></span></p>
-                    <p>Total Credit Line: <span id="total-credit-line"></span></p>
-                    <p>Total Monthly Interest: <span id="total-monthly-interest"></span></p>
-                </div>
-                <div id="card-list" class="space-y-4">
-                    <p class="text-center text-gray-500" id="no-cards-message">No accounts added yet.</p>
-                </div>
-            </div>
-
-            <!-- Payoff Strategies -->
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <!-- Debt Avalanche -->
-                <div class="bg-gray-50 p-6 rounded-lg shadow-sm">
-                    <h2 class="text-xl font-semibold mb-4 text-gray-800 flex items-center">
-                        <span class="mr-2">Debt Avalanche</span>
-                        <span class="text-sm font-normal text-gray-500">(Highest APR First)</span>
-                    </h2>
-                    <div id="avalanche-list" class="space-y-2">
-                        <p class="text-gray-500">Add accounts to see the payoff plan.</p>
-                    </div>
-                </div>
-
-                <!-- Debt Snowball -->
-                <div class="bg-gray-50 p-6 rounded-lg shadow-sm">
-                    <h2 class="text-xl font-semibold mb-4 text-gray-800 flex items-center">
-                        <span class="mr-2">Debt Snowball</span>
-                        <span class="text-sm font-normal text-gray-500">(Lowest Balance First)</span>
-                    </h2>
-                    <div id="snowball-list" class="space-y-2">
-                        <p class="text-gray-500">Add accounts to see the payoff plan.</p>
-                    </div>
-                </div>
-            </div>
-        </div>
+      </div>
+      <!-- /grid -->
     </div>
+  </div>
 
-    <!-- Custom Modal for Messages -->
-    <div id="message-modal" class="hidden modal-overlay">
-        <div class="modal-content">
-            <h3 id="modal-title" class="text-lg font-semibold mb-2"></h3>
-            <p id="modal-message" class="text-sm text-gray-600 mb-4"></p>
-            <div class="text-right">
-                <button id="modal-close-btn" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">Close</button>
-            </div>
-        </div>
+  <!-- Modal -->
+  <div id="message-modal" class="hidden modal-overlay">
+    <div class="modal-content">
+      <h3 id="modal-title" class="text-lg font-semibold mb-2"></h3>
+      <p id="modal-message" class="text-sm text-gray-600 mb-4"></p>
+      <div class="text-right">
+        <button id="modal-close-btn" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">Close</button>
+      </div>
     </div>
+  </div>
 
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        // Firebase configuration from Canvas environment
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
-        // UI elements
-        const form = document.getElementById('debt-form');
-        const cardList = document.getElementById('card-list');
-        const avalancheList = document.getElementById('avalanche-list');
-        const snowballList = document.getElementById('snowball-list');
-        const noCardsMessage = document.getElementById('no-cards-message');
-        const cardIdInput = document.getElementById('card-id');
-        const submitBtn = document.getElementById('submit-btn');
-        const totalDebtDisplay = document.getElementById('total-debt');
-        const totalCreditLineDisplay = document.getElementById('total-credit-line');
-        const totalMonthlyInterestDisplay = document.getElementById('total-monthly-interest');
-        const authSection = document.getElementById('auth-section');
-        const mainApp = document.getElementById('main-app');
-        const googleSigninBtn = document.getElementById('google-signin-btn');
-        const signOutBtn = document.getElementById('sign-out-btn');
-        const userDisplay = document.getElementById('user-display');
-        const authStatus = document.getElementById('auth-status');
-        const messageModal = document.getElementById('message-modal');
-        const modalTitle = document.getElementById('modal-title');
-        const modalMessage = document.getElementById('modal-message');
-        const modalCloseBtn = document.getElementById('modal-close-btn');
-
-        let db, auth, userId;
-
-        function showModal(title, message) {
-            modalTitle.textContent = title;
-            modalMessage.textContent = message;
-            messageModal.classList.remove('hidden');
-        }
-
-        modalCloseBtn.addEventListener('click', () => {
-            messageModal.classList.add('hidden');
-        });
-
-        // Firebase Initialization and Auth State Listener
-        function initFirebase() {
-            try {
-                const app = initializeApp(firebaseConfig);
-                auth = getAuth(app);
-                db = getFirestore(app);
-                
-                // Sign in with custom token if available, otherwise anonymously
-                if (initialAuthToken) {
-                    signInWithCustomToken(auth, initialAuthToken).catch(err => {
-                        console.error("Custom token sign-in failed, signing in anonymously.", err);
-                        signInAnonymously(auth);
-                    });
-                } else {
-                    signInAnonymously(auth);
-                }
-
-                onAuthStateChanged(auth, (user) => {
-                    if (user) {
-                        userId = user.uid;
-                        authSection.classList.add('hidden');
-                        mainApp.classList.remove('hidden');
-                        userDisplay.textContent = `Signed in as: ${user.displayName || 'Guest'}`;
-                        authStatus.textContent = '';
-                        // Set up Firestore listener
-                        setupFirestoreListener(user.uid);
-                    } else {
-                        userId = null;
-                        authSection.classList.remove('hidden');
-                        mainApp.classList.add('hidden');
-                    }
-                });
-
-            } catch (err) {
-                console.error("Failed to initialize Firebase:", err);
-                authStatus.textContent = 'Failed to initialize Firebase. Check your configuration.';
-            }
-        }
-
-        // Firestore Listener
-        let unsubscribe;
-        function setupFirestoreListener(uid) {
-            // Unsubscribe from previous listener if it exists
-            if (unsubscribe) {
-                unsubscribe();
-            }
-
-            const cardsCollection = collection(db, `artifacts/${appId}/users/${uid}/cards`);
-            unsubscribe = onSnapshot(cardsCollection, (snapshot) => {
-                const fetchedCards = snapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
-                }));
-                renderAll(fetchedCards);
-            }, (error) => {
-                console.error("Error listening to Firestore changes:", error);
-            });
-        }
-
-        // Render all cards and strategies
-        function renderAll(cards) {
-            renderCards(cards);
-            renderStrategy(cards, 'avalanche');
-            renderStrategy(cards, 'snowball');
-        }
-
-        // Render the list of cards and calculate totals
-        function renderCards(cards) {
-            cardList.innerHTML = '';
-            let totalMonthlyInterest = 0;
-            let totalDebt = 0;
-            let totalCreditLine = 0;
-            
-            if (cards.length === 0) {
-                noCardsMessage.style.display = 'block';
-            } else {
-                noCardsMessage.style.display = 'none';
-                cards.forEach(card => {
-                    const balance = parseFloat(card.balance);
-                    const apr = parseFloat(card.apr);
-                    const creditLimit = parseFloat(card.creditLimit);
-                    
-                    // Add to totals
-                    totalDebt += balance;
-                    totalCreditLine += creditLimit;
-                    
-                    // Calculate monthly interest
-                    const monthlyInterest = (balance * (apr / 100)) / 12;
-                    totalMonthlyInterest += monthlyInterest;
-
-                    // Calculate credit utilization
-                    const utilization = creditLimit > 0 ? (balance / creditLimit) * 100 : 0;
-                    
-                    // Determine color for utilization bar
-                    let utilizationColor = 'bg-red-500'; // High utilization (default)
-                    if (utilization <= 30) {
-                        utilizationColor = 'bg-green-500'; // Excellent
-                    } else if (utilization > 30 && utilization <= 50) {
-                        utilizationColor = 'bg-yellow-500'; // Good
-                    }
-
-                    const cardElement = document.createElement('div');
-                    cardElement.className = 'bg-white p-4 rounded-lg shadow-md transition-transform transform hover:scale-[1.01]';
-                    cardElement.innerHTML = `
-                        <div class="flex justify-between items-start mb-2">
-                            <div>
-                                <h3 class="font-medium text-gray-900">${card.name}</h3>
-                                <p class="text-sm text-gray-500">Balance: $<span class="font-semibold">${balance.toFixed(2)}</span></p>
-                                <p class="text-sm text-gray-500">APR: <span class="font-semibold">${apr.toFixed(2)}%</span></p>
-                                <p class="text-sm text-gray-500">Monthly Interest: $<span class="font-semibold">${isNaN(monthlyInterest) ? '0.00' : monthlyInterest.toFixed(2)}</span></p>
-                            </div>
-                            <div class="flex space-x-2">
-                                <button class="edit-btn px-3 py-1 text-sm bg-yellow-400 text-gray-800 rounded-lg hover:bg-yellow-500 transition-colors" data-id="${card.id}">Edit</button>
-                                <button class="delete-btn px-3 py-1 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors" data-id="${card.id}">Delete</button>
-                            </div>
-                        </div>
-                        <div class="mt-2">
-                            <p class="text-sm text-gray-700">
-                                Utilization: <span class="font-semibold">${utilization.toFixed(1)}%</span>
-                            </p>
-                            <div class="w-full bg-gray-200 rounded-full h-2.5 mt-1">
-                                <div class="${utilizationColor} h-2.5 rounded-full" style="width: ${utilization > 100 ? 100 : utilization}%;"></div>
-                            </div>
-                        </div>
-                    `;
-                    cardList.appendChild(cardElement);
-                });
-            }
-            
-            totalDebtDisplay.textContent = `$${totalDebt.toFixed(2)}`;
-            totalCreditLineDisplay.textContent = `$${totalCreditLine.toFixed(2)}`;
-            totalMonthlyInterestDisplay.textContent = `$${totalMonthlyInterest.toFixed(2)}`;
-        }
-
-        // Render a specific payoff strategy
-        function renderStrategy(cards, strategy) {
-            const targetList = strategy === 'avalanche' ? avalancheList : snowballList;
-            const sortedCards = sortCards(cards, strategy);
-            targetList.innerHTML = '';
-            if (cards.length === 0) {
-                targetList.innerHTML = '<p class="text-gray-500">Add accounts to see the payoff plan.</p>';
-                return;
-            }
-            sortedCards.forEach((card, index) => {
-                const strategyElement = document.createElement('div');
-                strategyElement.className = 'p-3 bg-white rounded-md shadow-sm border border-gray-200';
-                strategyElement.innerHTML = `
-                    <div class="flex items-center">
-                        <span class="text-lg font-bold text-gray-600 w-6">${index + 1}.</span>
-                        <div class="ml-2">
-                            <span class="font-medium text-gray-900">${card.name}</span>
-                            <p class="text-xs text-gray-500">Balance: $${parseFloat(card.balance).toFixed(2)} • APR: ${parseFloat(card.apr).toFixed(2)}%</p>
-                        </div>
-                    </div>
-                `;
-                targetList.appendChild(strategyElement);
-            });
-        }
-
-        // Sort cards based on the selected strategy
-        function sortCards(cards, strategy) {
-            if (strategy === 'avalanche') {
-                // Sort by APR (highest to lowest)
-                return [...cards].sort((a, b) => parseFloat(b.apr) - parseFloat(a.apr));
-            } else if (strategy === 'snowball') {
-                // Sort by balance (lowest to highest)
-                return [...cards].sort((a, b) => parseFloat(a.balance) - parseFloat(b.balance));
-            }
-            return [];
-        }
-
-        // Handle form submission
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const cardId = cardIdInput.value;
-            const name = document.getElementById('card-name').value;
-            const balance = parseFloat(document.getElementById('balance').value);
-            const apr = parseFloat(document.getElementById('apr').value);
-            const creditLimit = parseFloat(document.getElementById('limit').value);
-
-            if (isNaN(balance) || isNaN(apr) || isNaN(creditLimit)) {
-                console.error("Please enter valid numbers for Balance, APR, and Credit Limit.");
-                return;
-            }
-
-            const cardData = { name, balance, apr, creditLimit };
-            const cardsCollection = collection(db, `artifacts/${appId}/users/${userId}/cards`);
-
-            try {
-                if (cardId) {
-                    // Update existing card
-                    await setDoc(doc(cardsCollection, cardId), cardData);
-                } else {
-                    // Add new card
-                    await setDoc(doc(cardsCollection), cardData);
-                }
-            } catch (e) {
-                console.error("Error adding/updating document: ", e);
-            }
-
-            form.reset();
-            cardIdInput.value = '';
-            submitBtn.textContent = 'Add Account';
-        });
-
-        // Handle delete and edit buttons
-        cardList.addEventListener('click', async (e) => {
-            const id = e.target.dataset.id;
-            if (e.target.classList.contains('delete-btn')) {
-                const cardsCollection = collection(db, `artifacts/${appId}/users/${userId}/cards`);
-                try {
-                    await deleteDoc(doc(cardsCollection, id));
-                } catch (e) {
-                    console.error("Error removing document: ", e);
-                }
-            } else if (e.target.classList.contains('edit-btn')) {
-                const cardDoc = cards.find(card => card.id === id);
-                if (cardDoc) {
-                    document.getElementById('card-id').value = cardDoc.id;
-                    document.getElementById('card-name').value = cardDoc.name;
-                    document.getElementById('balance').value = cardDoc.balance;
-                    document.getElementById('apr').value = cardDoc.apr;
-                    document.getElementById('limit').value = cardDoc.creditLimit;
-                    submitBtn.textContent = 'Update Account';
-                }
-            }
-        });
-
-        // Google Sign-in - now handles gracefully
-        googleSigninBtn.addEventListener('click', () => {
-            showModal(
-                "Sign-in Not Required",
-                "Your account is automatically created and persistent in this environment. You can start using the app now, and your data will be saved securely."
-            );
-        });
-
-        // Sign Out
-        signOutBtn.addEventListener('click', async () => {
-            try {
-                await signOut(auth);
-                noCardsMessage.style.display = 'block';
-                cardList.innerHTML = '';
-                totalDebtDisplay.textContent = `$0.00`;
-                totalCreditLineDisplay.textContent = `$0.00`;
-                totalMonthlyInterestDisplay.textContent = `$0.00`;
-                form.reset();
-            } catch (err) {
-                console.error("Sign-out failed: ", err);
-            }
-        });
-
-        // Initialize Firebase on page load
-        initFirebase();
-    </script>
+  <!-- App JS (ES module) -->
+  <script type="module" src="app.js"></script>
 </body>
 </html>
