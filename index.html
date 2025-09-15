@@ -1,270 +1,521 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1, viewport-fit=cover"
-  />
-  <meta name="theme-color" content="#0ea5e9" />
-  <title>Personal Debt Tracker</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-   <script src="env.js"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
-  <!-- PWA manifest (optional; create /manifest.webmanifest to enable install prompts) -->
-  <link rel="manifest" href="/manifest.webmanifest" />
-  <style>
-    html { scroll-behavior: smooth; }
-    body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; color: #1f2937; }
-    .modal-overlay { position: fixed; inset:0; background-color: rgba(0,0,0,0.5); display:flex; justify-content:center; align-items:center; z-index:1000; }
-    .modal-content { background:#fff; padding:2rem; border-radius:0.75rem; box-shadow:0 4px 6px rgba(0,0,0,0.1); max-width:90%; width:420px; }
-    .name-fit { max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display:inline-block; }
-  </style>
-</head>
-<body class="p-3 sm:p-6 md:p-10 lg:p-12">
-  <a href="#main" class="sr-only focus:not-sr-only focus:absolute focus:m-2 focus:p-2 focus:bg-white focus:rounded">Skip to content</a>
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0ea5e9" />
+    <title>Personal Debt Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="env.js"></script>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <!-- PWA manifest (optional; create /manifest.webmanifest to enable install prompts) -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <style>
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        font-family: "Inter", sans-serif;
+        background-color: #f3f4f6;
+        color: #1f2937;
+      }
+      .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background-color: rgba(0, 0, 0, 0.5);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+      }
+      .modal-content {
+        background: #fff;
+        padding: 2rem;
+        border-radius: 0.75rem;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        max-width: 90%;
+        width: 420px;
+      }
+      .name-fit {
+        max-width: 260px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: inline-block;
+      }
+    </style>
+  </head>
+  <body class="p-3 sm:p-6 md:p-10 lg:p-12">
+    <a
+      href="#main"
+      class="sr-only focus:not-sr-only focus:absolute focus:m-2 focus:p-2 focus:bg-white focus:rounded"
+      >Skip to content</a
+    >
 
-  <div class="max-w-5xl mx-auto bg-white p-4 sm:p-6 md:p-8 rounded-xl shadow-lg">
-
-    <!-- Top Nav -->
-    <header class="flex flex-wrap items-center justify-between gap-3 mb-6 border-b pb-3">
-      <div class="flex items-center gap-2">
-        <div class="w-3 h-3 rounded-full bg-sky-600"></div>
-        <h1 class="text-2xl font-bold">Debt Payoff Planner</h1>
-      </div>
-
-      <nav aria-label="Primary" class="flex flex-wrap gap-2 text-sm">
-        <a href="#accounts"  class="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 hover:border-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500">Accounts</a>
-        <a href="#hints"     class="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 hover:border-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500">Score Hints</a>
-        <a href="#strategies" class="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 hover:border-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500">Strategies</a>
-        <a href="#optimizer" class="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 hover:border-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500">0% Optimizer</a>
-      </nav>
-
-      <div class="flex items-center gap-2">
-        <div class="hidden sm:flex gap-2">
-          <button onclick="exportData('csv')"  class="text-sm px-3 py-1.5 rounded-lg border hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500">Export CSV</button>
-          <button onclick="exportData('json')" class="text-sm px-3 py-1.5 rounded-lg border hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500">Export JSON</button>
+    <div
+      class="max-w-5xl mx-auto bg-white p-4 sm:p-6 md:p-8 rounded-xl shadow-lg"
+    >
+      <!-- Top Nav -->
+      <header
+        class="flex flex-wrap items-center justify-between gap-3 mb-6 border-b pb-3"
+      >
+        <div class="flex items-center gap-2">
+          <div class="w-3 h-3 rounded-full bg-sky-600"></div>
+          <h1 class="text-2xl font-bold">Debt Payoff Planner</h1>
         </div>
-        <span id="user-display" class="text-sm text-gray-600"></span>
-        <button id="sign-out-btn" class="hidden text-sm text-red-600 hover:text-red-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500">Sign Out</button>
-      </div>
-    </header>
 
-    <!-- Anchor for skip-link -->
-    <div id="main"></div>
+        <nav aria-label="Primary" class="flex flex-wrap gap-2 text-sm">
+          <a
+            href="#accounts"
+            class="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 hover:border-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+            >Accounts</a
+          >
+          <a
+            href="#hints"
+            class="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 hover:border-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+            >Score Hints</a
+          >
+          <a
+            href="#strategies"
+            class="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 hover:border-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+            >Strategies</a
+          >
+          <a
+            href="#optimizer"
+            class="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 hover:border-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+            >0% Optimizer</a
+          >
+        </nav>
 
-    <!-- Auth UI -->
-    <section id="auth-section" class="text-center mb-8">
-      <h2 class="text-xl font-semibold mb-2">Sign in to Save Your Data</h2>
-      <p class="text-gray-600 mb-4">Securely store your accounts in your Firebase Firestore. Data Encryption is coming soon. </p>
-      <button id="google-signin-btn" class="bg-sky-600 hover:bg-sky-700 text-white font-semibold py-2.5 px-5 rounded-lg transition-colors shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500">
-        Sign in with Google
-      </button>
-      <p id="auth-status" class="mt-4 text-sm text-gray-500"></p>
-    </section>
+        <div class="flex items-center gap-2">
+          <div class="hidden sm:flex gap-2">
+            <button
+              onclick="exportData('csv')"
+              class="text-sm px-3 py-1.5 rounded-lg border hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+            >
+              Export CSV
+            </button>
+            <button
+              onclick="exportData('json')"
+              class="text-sm px-3 py-1.5 rounded-lg border hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+            >
+              Export JSON
+            </button>
+          </div>
+          <span id="user-display" class="text-sm text-gray-600"></span>
+          <button
+            id="sign-out-btn"
+            class="hidden text-sm text-red-600 hover:text-red-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+          >
+            Sign Out
+          </button>
+        </div>
+      </header>
 
-    <!-- Main App UI -->
-    <main id="main-app" class="hidden">
-      <!-- KPI Tiles -->
-      <section class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-        <div class="rounded-lg p-4 bg-sky-50 border border-sky-100">
-          <p class="text-xs uppercase tracking-wide text-sky-700">Total Debt</p>
-          <p id="total-debt" class="text-2xl font-bold text-sky-900">$0.00</p>
-        </div>
-        <div class="rounded-lg p-4 bg-indigo-50 border border-indigo-100">
-          <p class="text-xs uppercase tracking-wide text-indigo-700">Total Credit</p>
-          <p id="total-credit-line" class="text-2xl font-bold text-indigo-900">$0.00</p>
-        </div>
-        <div class="rounded-lg p-4 bg-rose-50 border border-rose-100">
-          <p class="text-xs uppercase tracking-wide text-rose-700">Monthly Interest</p>
-          <p id="total-monthly-interest" class="text-2xl font-bold text-rose-900">$0.00</p>
-        </div>
+      <!-- Anchor for skip-link -->
+      <div id="main"></div>
+
+      <!-- Auth UI -->
+      <section id="auth-section" class="text-center mb-8">
+        <h2 class="text-xl font-semibold mb-2">Sign in to Save Your Data</h2>
+        <p class="text-gray-600 mb-4">
+          Securely store your accounts in your Firebase Firestore. Data
+          Encryption is coming soon.
+        </p>
+        <button
+          id="google-signin-btn"
+          class="bg-sky-600 hover:bg-sky-700 text-white font-semibold py-2.5 px-5 rounded-lg transition-colors shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+        >
+          Sign in with Google
+        </button>
+        <p id="auth-status" class="mt-4 text-sm text-gray-500"></p>
       </section>
 
-      <!-- Input Form -->
-      <section class="bg-gray-50 p-5 rounded-lg mb-8 shadow-sm" aria-labelledby="add-edit">
-        <h2 id="add-edit" class="text-lg font-semibold mb-4 text-gray-800">Add or Edit Account</h2>
-        <form id="debt-form" class="space-y-4">
-          <input type="hidden" id="card-id" />
-          <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div class="md:col-span-2">
-              <label class="block text-sm text-gray-700 mb-1">Account Name</label>
-              <input id="card-name" type="text" placeholder="e.g., Amex Blue Cash" required
-                     class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"/>
+      <!-- Main App UI -->
+      <main id="main-app" class="hidden">
+        <!-- KPI Tiles -->
+        <section class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+          <div class="rounded-lg p-4 bg-sky-50 border border-sky-100">
+            <p class="text-xs uppercase tracking-wide text-sky-700">
+              Total Debt
+            </p>
+            <p id="total-debt" class="text-2xl font-bold text-sky-900">$0.00</p>
+          </div>
+          <div class="rounded-lg p-4 bg-indigo-50 border border-indigo-100">
+            <p class="text-xs uppercase tracking-wide text-indigo-700">
+              Total Credit
+            </p>
+            <p
+              id="total-credit-line"
+              class="text-2xl font-bold text-indigo-900"
+            >
+              $0.00
+            </p>
+          </div>
+          <div class="rounded-lg p-4 bg-rose-50 border border-rose-100">
+            <p class="text-xs uppercase tracking-wide text-rose-700">
+              Monthly Interest
+            </p>
+            <p
+              id="total-monthly-interest"
+              class="text-2xl font-bold text-rose-900"
+            >
+              $0.00
+            </p>
+          </div>
+        </section>
+
+        <!-- Input Form -->
+        <section
+          class="bg-gray-50 p-5 rounded-lg mb-8 shadow-sm"
+          aria-labelledby="add-edit"
+        >
+          <h2 id="add-edit" class="text-lg font-semibold mb-4 text-gray-800">
+            Add or Edit Account
+          </h2>
+          <form id="debt-form" class="space-y-4">
+            <input type="hidden" id="card-id" />
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div class="md:col-span-2">
+                <label class="block text-sm text-gray-700 mb-1"
+                  >Account Name</label
+                >
+                <input
+                  id="card-name"
+                  type="text"
+                  placeholder="e.g., Amex Blue Cash"
+                  required
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                />
+              </div>
+              <div>
+                <label class="block text-sm text-gray-700 mb-1"
+                  >Balance ($)</label
+                >
+                <input
+                  id="balance"
+                  type="number"
+                  placeholder="1000"
+                  required
+                  step="0.01"
+                  min="0"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                />
+              </div>
+              <div>
+                <label class="block text-sm text-gray-700 mb-1">APR (%)</label>
+                <input
+                  id="apr"
+                  type="number"
+                  placeholder="24.99"
+                  required
+                  step="0.01"
+                  min="0"
+                  max="99.99"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                />
+              </div>
+              <div>
+                <label class="block text-sm text-gray-700 mb-1"
+                  >Credit Limit ($)</label
+                >
+                <input
+                  id="limit"
+                  type="number"
+                  placeholder="5000"
+                  required
+                  step="0.01"
+                  min="0"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                />
+              </div>
             </div>
-            <div>
-              <label class="block text-sm text-gray-700 mb-1">Balance ($)</label>
-              <input id="balance" type="number" placeholder="1000" required step="0.01" min="0"
-                     class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"/>
+            <div class="flex flex-wrap items-center gap-3 justify-between">
+              <button
+                type="submit"
+                id="submit-btn"
+                class="px-5 py-2.5 bg-sky-600 text-white rounded-lg font-semibold hover:bg-sky-700 transition-colors shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+              >
+                Add Account
+              </button>
+
+              <!-- Accounts controls -->
+              <div class="flex flex-wrap items-center gap-3">
+                <label class="text-sm text-gray-700">Sort by</label>
+                <select
+                  id="sort-by"
+                  class="text-sm border rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-sky-500"
+                >
+                  <option value="name">Name</option>
+                  <option value="apr">APR</option>
+                  <option value="balance">Balance</option>
+                  <option value="utilization">Utilization</option>
+                  <option value="interestPer100">Interest per $100</option>
+                </select>
+                <button
+                  id="sort-dir"
+                  type="button"
+                  class="text-sm px-3 py-1.5 rounded-lg border hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+                  data-dir="desc"
+                >
+                  Desc
+                </button>
+
+                <label class="text-sm text-gray-700 ml-3"
+                  >Utilization View</label
+                >
+                <select
+                  id="util-view"
+                  class="text-sm border rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-sky-500"
+                >
+                  <option value="bar">Bar</option>
+                  <option value="pie">Pie</option>
+                </select>
+              </div>
             </div>
-            <div>
-              <label class="block text-sm text-gray-700 mb-1">APR (%)</label>
-              <input id="apr" type="number" placeholder="24.99" required step="0.01" min="0" max="99.99"
-                     class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"/>
+          </form>
+        </section>
+
+        <!-- Accounts List -->
+        <section id="accounts" class="bg-gray-50 p-5 rounded-lg mb-8 shadow-sm">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-lg font-semibold text-gray-800">My Accounts</h2>
+            <p class="text-sm text-gray-500" id="accounts-meta"></p>
+          </div>
+          <div id="card-list" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <p
+              class="text-center text-gray-500 col-span-full"
+              id="no-cards-message"
+            >
+              No accounts added yet.
+            </p>
+          </div>
+        </section>
+
+        <!-- Credit Score Hints -->
+        <section id="hints" class="bg-gray-50 p-5 rounded-lg mb-8 shadow-sm">
+          <h2 class="text-lg font-semibold mb-4 text-gray-800">
+            Credit Score Hints
+          </h2>
+          <div id="fico-hints" class="space-y-2 text-sm text-gray-700">
+            <p class="text-gray-500">
+              Add accounts to see utilization thresholds and “nudge” amounts.
+            </p>
+          </div>
+        </section>
+
+        <!-- Strategies + Cost -->
+        <section id="strategies" class="mb-8">
+          <h2 class="text-lg font-semibold mb-3 text-gray-800">
+            Payoff Strategies & Cost Ranking
+          </h2>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="bg-gray-50 p-5 rounded-lg shadow-sm">
+              <h3
+                class="text-base font-semibold mb-3 text-gray-800 flex items-center"
+              >
+                <span class="mr-2">Debt Avalanche</span>
+                <span class="text-xs font-medium text-gray-500"
+                  >(Highest APR First)</span
+                >
+              </h3>
+              <div id="avalanche-list" class="space-y-2">
+                <p class="text-gray-500">
+                  Add accounts to see the payoff plan.
+                </p>
+              </div>
             </div>
-            <div>
-              <label class="block text-sm text-gray-700 mb-1">Credit Limit ($)</label>
-              <input id="limit" type="number" placeholder="5000" required step="0.01" min="0"
-                     class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"/>
+
+            <div class="bg-gray-50 p-5 rounded-lg shadow-sm">
+              <h3
+                class="text-base font-semibold mb-3 text-gray-800 flex items-center"
+              >
+                <span class="mr-2">Debt Snowball</span>
+                <span class="text-xs font-medium text-gray-500"
+                  >(Lowest Balance First)</span
+                >
+              </h3>
+              <div id="snowball-list" class="space-y-2">
+                <p class="text-gray-500">
+                  Add accounts to see the payoff plan.
+                </p>
+              </div>
+            </div>
+
+            <div class="bg-gray-50 p-5 rounded-lg shadow-sm">
+              <h3 class="text-base font-semibold mb-3 text-gray-800">
+                Most Expensive Balances
+              </h3>
+              <div id="expensive-list" class="space-y-2">
+                <p class="text-gray-500">
+                  Add accounts to see per-$100 cost ranking.
+                </p>
+              </div>
             </div>
           </div>
-          <div class="flex flex-wrap items-center gap-3 justify-between">
-            <button type="submit" id="submit-btn"
-                    class="px-5 py-2.5 bg-sky-600 text-white rounded-lg font-semibold hover:bg-sky-700 transition-colors shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500">
-              Add Account
-            </button>
+        </section>
 
-            <!-- Accounts controls -->
+        <!-- Balance Transfer Optimizer (full width) -->
+        <section id="optimizer" class="bg-gray-50 p-5 rounded-lg shadow-sm">
+          <h2
+            class="text-lg font-semibold mb-4 text-gray-800 flex items-center"
+          >
+            <span class="mr-2">Balance-Transfer Optimizer</span>
+            <span class="text-xs font-medium text-gray-500"
+              >(0% APR planner)</span
+            >
+          </h2>
+          <div class="space-y-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+              <div class="md:col-span-2">
+                <label
+                  for="bt-target-id"
+                  class="block text-sm text-gray-700 mb-1"
+                  >0% Target Card</label
+                >
+                <select
+                  id="bt-target-id"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                >
+                  <option value="">-- Select 0% target card --</option>
+                </select>
+                <p class="text-xs text-gray-500 mt-1">
+                  Pick the card receiving the transfers (your 0% intro APR
+                  card).
+                </p>
+              </div>
+
+              <div>
+                <label class="block text-sm text-gray-700 mb-1"
+                  >0% Limit ($)</label
+                >
+                <input
+                  id="bt-limit"
+                  type="number"
+                  step="0.01"
+                  placeholder="1100"
+                  min="0"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                />
+              </div>
+              <div>
+                <label class="block text-sm text-gray-700 mb-1"
+                  >Intro Months</label
+                >
+                <input
+                  id="bt-months"
+                  type="number"
+                  step="1"
+                  placeholder="18"
+                  min="0"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                />
+              </div>
+              <div>
+                <label class="block text-sm text-gray-700 mb-1"
+                  >Transfer Fee (%)</label
+                >
+                <input
+                  id="bt-fee"
+                  type="number"
+                  step="0.01"
+                  placeholder="3"
+                  min="0"
+                  max="99.99"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                />
+              </div>
+              <div>
+                <label class="block text-sm text-gray-700 mb-1"
+                  >Cap Utilization on 0% Card (%)</label
+                >
+                <input
+                  id="bt-cap"
+                  type="number"
+                  step="1"
+                  placeholder="80"
+                  min="0"
+                  max="100"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                />
+                <p class="text-xs text-gray-500 mt-1">
+                  Leave blank to allow maxing; 80 avoids “maxed card” penalty.
+                </p>
+              </div>
+            </div>
+
             <div class="flex flex-wrap items-center gap-3">
-              <label class="text-sm text-gray-700">Sort by</label>
-              <select id="sort-by" class="text-sm border rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-sky-500">
-                <option value="name">Name</option>
-                <option value="apr">APR</option>
-                <option value="balance">Balance</option>
-                <option value="utilization">Utilization</option>
-                <option value="interestPer100">Interest per $100</option>
-              </select>
-              <button id="sort-dir" type="button" class="text-sm px-3 py-1.5 rounded-lg border hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500" data-dir="desc">Desc</button>
+              <button
+                id="bt-run"
+                class="px-4 py-2 bg-sky-600 text-white rounded-lg font-semibold hover:bg-sky-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+              >
+                Recommend Transfer
+              </button>
+              <button
+                id="bt-reset"
+                class="px-4 py-2 bg-white text-gray-800 rounded-lg font-semibold border hover:bg-gray-50 transition-colors focus-visible:ring-2 focus-visible:ring-sky-500"
+              >
+                Reset
+              </button>
 
-              <label class="text-sm text-gray-700 ml-3">Utilization View</label>
-              <select id="util-view" class="text-sm border rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-sky-500">
-                <option value="bar">Bar</option>
-                <option value="pie">Pie</option>
-              </select>
+              <div class="flex sm:hidden gap-2">
+                <button
+                  onclick="exportData('csv')"
+                  class="text-sm px-3 py-1.5 rounded-lg border hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-sky-500"
+                >
+                  Export CSV
+                </button>
+                <button
+                  onclick="exportData('json')"
+                  class="text-sm px-3 py-1.5 rounded-lg border hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-sky-500"
+                >
+                  Export JSON
+                </button>
+              </div>
+              <p id="bt-note" class="text-xs text-gray-500">
+                Tip: Start with the highest interest per $100.
+              </p>
+            </div>
+
+            <div id="bt-output" class="mt-3 space-y-2 text-sm text-gray-700">
+              <p class="text-gray-500">
+                Enter details and click “Recommend Transfer”.
+              </p>
             </div>
           </div>
-        </form>
-      </section>
+        </section>
+      </main>
+    </div>
 
-      <!-- Accounts List -->
-      <section id="accounts" class="bg-gray-50 p-5 rounded-lg mb-8 shadow-sm">
-        <div class="flex items-center justify-between mb-3">
-          <h2 class="text-lg font-semibold text-gray-800">My Accounts</h2>
-          <p class="text-sm text-gray-500" id="accounts-meta"></p>
+    <!-- Modal -->
+    <div
+      id="message-modal"
+      class="hidden modal-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="modal-title"
+    >
+      <div class="modal-content">
+        <h3 id="modal-title" class="text-lg font-semibold mb-2"></h3>
+        <p id="modal-message" class="text-sm text-gray-600 mb-4"></p>
+        <div class="text-right">
+          <button
+            id="modal-close-btn"
+            class="px-4 py-2 bg-sky-600 text-white rounded-lg hover:bg-sky-700 transition-colors focus-visible:ring-2 focus-visible:ring-sky-500"
+          >
+            Close
+          </button>
         </div>
-        <div id="card-list" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <p class="text-center text-gray-500 col-span-full" id="no-cards-message">No accounts added yet.</p>
-        </div>
-      </section>
-
-      <!-- Credit Score Hints -->
-      <section id="hints" class="bg-gray-50 p-5 rounded-lg mb-8 shadow-sm">
-        <h2 class="text-lg font-semibold mb-4 text-gray-800">Credit Score Hints</h2>
-        <div id="fico-hints" class="space-y-2 text-sm text-gray-700">
-          <p class="text-gray-500">Add accounts to see utilization thresholds and “nudge” amounts.</p>
-        </div>
-      </section>
-
-      <!-- Strategies + Cost -->
-      <section id="strategies" class="mb-8">
-        <h2 class="text-lg font-semibold mb-3 text-gray-800">Payoff Strategies & Cost Ranking</h2>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div class="bg-gray-50 p-5 rounded-lg shadow-sm">
-            <h3 class="text-base font-semibold mb-3 text-gray-800 flex items-center">
-              <span class="mr-2">Debt Avalanche</span>
-              <span class="text-xs font-medium text-gray-500">(Highest APR First)</span>
-            </h3>
-            <div id="avalanche-list" class="space-y-2">
-              <p class="text-gray-500">Add accounts to see the payoff plan.</p>
-            </div>
-          </div>
-
-          <div class="bg-gray-50 p-5 rounded-lg shadow-sm">
-            <h3 class="text-base font-semibold mb-3 text-gray-800 flex items-center">
-              <span class="mr-2">Debt Snowball</span>
-              <span class="text-xs font-medium text-gray-500">(Lowest Balance First)</span>
-            </h3>
-            <div id="snowball-list" class="space-y-2">
-              <p class="text-gray-500">Add accounts to see the payoff plan.</p>
-            </div>
-          </div>
-
-          <div class="bg-gray-50 p-5 rounded-lg shadow-sm">
-            <h3 class="text-base font-semibold mb-3 text-gray-800">Most Expensive Balances</h3>
-            <div id="expensive-list" class="space-y-2">
-              <p class="text-gray-500">Add accounts to see per-$100 cost ranking.</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Balance Transfer Optimizer (full width) -->
-      <section id="optimizer" class="bg-gray-50 p-5 rounded-lg shadow-sm">
-        <h2 class="text-lg font-semibold mb-4 text-gray-800 flex items-center">
-          <span class="mr-2">Balance-Transfer Optimizer</span>
-          <span class="text-xs font-medium text-gray-500">(0% APR planner)</span>
-        </h2>
-        <div class="space-y-3">
-          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
-            <div class="md:col-span-2">
-              <label for="bt-target-id" class="block text-sm text-gray-700 mb-1">0% Target Card</label>
-              <select id="bt-target-id"
-                      class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500">
-                <option value="">-- Select 0% target card --</option>
-              </select>
-              <p class="text-xs text-gray-500 mt-1">Pick the card receiving the transfers (your 0% intro APR card).</p>
-            </div>
-
-            <div>
-              <label class="block text-sm text-gray-700 mb-1">0% Limit ($)</label>
-              <input id="bt-limit" type="number" step="0.01" placeholder="1100" min="0"
-                     class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"/>
-            </div>
-            <div>
-              <label class="block text-sm text-gray-700 mb-1">Intro Months</label>
-              <input id="bt-months" type="number" step="1" placeholder="18" min="0"
-                     class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"/>
-            </div>
-            <div>
-              <label class="block text-sm text-gray-700 mb-1">Transfer Fee (%)</label>
-              <input id="bt-fee" type="number" step="0.01" placeholder="3" min="0" max="99.99"
-                     class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"/>
-            </div>
-            <div>
-              <label class="block text-sm text-gray-700 mb-1">Cap Utilization on 0% Card (%)</label>
-              <input id="bt-cap" type="number" step="1" placeholder="80" min="0" max="100"
-                     class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"/>
-              <p class="text-xs text-gray-500 mt-1">Leave blank to allow maxing; 80 avoids “maxed card” penalty.</p>
-            </div>
-          </div>
-
-          <div class="flex flex-wrap items-center gap-3">
-            <button id="bt-run" class="px-4 py-2 bg-sky-600 text-white rounded-lg font-semibold hover:bg-sky-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500">
-              Recommend Transfer
-            </button>
-            <button id="bt-reset"
-                    class="px-4 py-2 bg-white text-gray-800 rounded-lg font-semibold border hover:bg-gray-50 transition-colors focus-visible:ring-2 focus-visible:ring-sky-500">
-              Reset
-            </button>
-
-            <div class="flex sm:hidden gap-2">
-              <button onclick="exportData('csv')"  class="text-sm px-3 py-1.5 rounded-lg border hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-sky-500">Export CSV</button>
-              <button onclick="exportData('json')" class="text-sm px-3 py-1.5 rounded-lg border hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-sky-500">Export JSON</button>
-            </div>
-            <p id="bt-note" class="text-xs text-gray-500">Tip: Start with the highest interest per $100.</p>
-          </div>
-
-          <div id="bt-output" class="mt-3 space-y-2 text-sm text-gray-700">
-            <p class="text-gray-500">Enter details and click “Recommend Transfer”.</p>
-          </div>
-        </div>
-      </section>
-    </main>
-  </div>
-
-  <!-- Modal -->
-  <div id="message-modal" class="hidden modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-    <div class="modal-content">
-      <h3 id="modal-title" class="text-lg font-semibold mb-2"></h3>
-      <p id="modal-message" class="text-sm text-gray-600 mb-4"></p>
-      <div class="text-right">
-        <button id="modal-close-btn" class="px-4 py-2 bg-sky-600 text-white rounded-lg hover:bg-sky-700 transition-colors focus-visible:ring-2 focus-visible:ring-sky-500">Close</button>
       </div>
     </div>
-  </div>
 
-  <!-- Scripts: env first, then app -->
- 
-  <script type="module" src="app.js"></script>
-</body>
+    <!-- Scripts -->
+    <script type="module" src="app.js"></script>
+  </body>
 </html>
