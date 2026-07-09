@@ -200,6 +200,8 @@ const USD = new Intl.NumberFormat("en-US", {
   currency: "USD",
 });
 const fmtMoney = (n) => USD.format(+n || 0);
+const ESCAPE_MAP = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+const escapeHtml = (str) => String(str ?? "").replace(/[&<>"']/g, (m) => ESCAPE_MAP[m]);
 const monthlyInterest = (balance, aprPct) =>
   !balance || !aprPct ? 0 : (balance * (aprPct / 100)) / 12;
 const interestPer100 = (aprPct) => (!aprPct ? 0 : monthlyInterest(100, aprPct));
@@ -494,8 +496,8 @@ function renderCards(cards) {
           <div class="min-w-0">
             <h3 class="name-fit font-semibold text-gray-900 flex items-center whitespace-nowrap overflow-hidden text-ellipsis ${nameFontClass(
               card.name
-            )}" title="${card.name}">
-              ${card.name} ${riskBadge(utilization)}
+            )}" title="${escapeHtml(card.name)}">
+              ${escapeHtml(card.name)} ${riskBadge(utilization)}
             </h3>
             <div class="mt-1 grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-gray-600">
               <p>Balance: <span class="font-semibold text-gray-900">${fmtMoney(
@@ -565,10 +567,10 @@ function renderCards(cards) {
           <div class="min-w-0">
             <h3 class="name-fit font-semibold text-gray-900 flex items-center whitespace-nowrap overflow-hidden text-ellipsis ${nameFontClass(
               card.name
-            )}" title="${card.name}">
-              ${
+            )}" title="${escapeHtml(card.name)}">
+              ${escapeHtml(
                 card.name
-              } <span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">Editing</span>
+              )} <span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">Editing</span>
             </h3>
             <div class="mt-3 space-y-3 text-sm">
               <label class="block">
@@ -588,7 +590,7 @@ function renderCards(cards) {
               </label>
               <label class="block">
                 <span class="text-gray-600">Name</span>
-                <input data-field="name" type="text" value="${card.name}"
+                <input data-field="name" type="text" value="${escapeHtml(card.name)}"
                        class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-sky-500"/>
               </label>
             </div>
@@ -653,8 +655,8 @@ function renderStrategy(cards, strategy) {
           <span class="text-lg font-bold text-gray-600 w-6">${idx + 1}.</span>
           <p class="ml-2 font-medium text-gray-900 whitespace-nowrap overflow-hidden text-ellipsis ${nameFontClass(
             card.name
-          )}" title="${card.name}">
-            ${card.name}
+          )}" title="${escapeHtml(card.name)}">
+            ${escapeHtml(card.name)}
           </p>
         </div>
         <p class="text-xs text-gray-500">Bal ${fmtMoney(
@@ -687,7 +689,7 @@ function renderExpensive(cards) {
         <div class="ml-2 min-w-0">
           <p class="font-medium text-gray-900 whitespace-nowrap overflow-hidden text-ellipsis ${nameFontClass(
             r.name
-          )}" title="${r.name}">${r.name}</p>
+          )}" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</p>
           <p class="text-xs text-gray-500">APR ${r.apr.toFixed(
             2
           )}% • Balance ${fmtMoney(r.balance)}</p>
@@ -1214,7 +1216,7 @@ btRunBtn?.addEventListener("click", () => {
   const hdr = document.createElement("div");
   hdr.className = "p-3 bg-white rounded-md border border-gray-200";
   hdr.innerHTML = `
-    <p class="font-medium">Target: ${result.target}${
+    <p class="font-medium">Target: ${escapeHtml(result.target)}${
     result.capApplied !== null ? ` (cap ${result.capApplied}%)` : ""
   }</p>
     <p>Total Transfer: <span class="font-semibold">${fmtMoney(
@@ -1243,7 +1245,7 @@ btRunBtn?.addEventListener("click", () => {
       row.innerHTML = `
         <span class="font-medium">${i + 1}.</span> Move ${fmtMoney(
         m.amount
-      )} from <span class="font-semibold">${m.from}</span>
+      )} from <span class="font-semibold">${escapeHtml(m.from)}</span>
         (APR ${m.apr.toFixed(2)}%) • Est monthly saved ~${fmtMoney(
         m.estMonthlySaved
       )}
@@ -1275,7 +1277,7 @@ btResetBtn?.addEventListener("click", () => {
   toast("Optimizer reset");
 });
 
-// PWA SW registration (optional; harmless if missing)
+// PWA SW registration (enables offline app-shell caching)
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
