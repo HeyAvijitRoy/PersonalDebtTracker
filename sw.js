@@ -36,7 +36,7 @@ self.addEventListener("fetch", (event) => {
           }
           return response;
         })
-        .catch(async () => cached || (await caches.match("/index.html")) || Response.error());
+        .catch(() => cached);
       return cached || network;
     })
   );
