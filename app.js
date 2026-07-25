@@ -1491,6 +1491,39 @@ function parseCsv(text) {
   return { rows, errors };
 }
 
+// Parse the JSON export format (array of {name, balance, apr, creditLimit}),
+// validating each entry with the same rules as manual entry.
+function parseJson(text) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    return { rows: [], errors: ["File is not valid JSON."] };
+  }
+  const arr = Array.isArray(parsed) ? parsed : parsed?.cards;
+  if (!Array.isArray(arr)) {
+    return {
+      rows: [],
+      errors: ["Expected a JSON array of accounts (as produced by Export JSON)."],
+    };
+  }
+  const rows = [];
+  const errors = [];
+  arr.forEach((entry, i) => {
+    const name = (entry?.name ?? "").toString().trim();
+    const balance = parseFloat(entry?.balance);
+    const apr = parseFloat(entry?.apr);
+    const creditLimit = parseFloat(entry?.creditLimit);
+    const fieldErrors = validateCardInput({ name, balance, apr, creditLimit });
+    if (Object.keys(fieldErrors).length) {
+      errors.push(`Item ${i + 1}: ${Object.values(fieldErrors).join(" ")}`);
+      return;
+    }
+    rows.push({ name, balance, apr, creditLimit });
+  });
+  return { rows, errors };
+}
+
 importCsvBtn?.addEventListener("click", () => importCsvInput?.click());
 importCsvInput?.addEventListener("change", async () => {
   const file = importCsvInput.files?.[0];
@@ -1506,7 +1539,12 @@ importCsvInput?.addEventListener("change", async () => {
   }
 
   const text = await file.text();
-  const { rows, errors } = parseCsv(text);
+  const isJson =
+    /\.json$/i.test(file.name) ||
+    file.type === "application/json" ||
+    text.trim().startsWith("[") ||
+    text.trim().startsWith("{");
+  const { rows, errors } = isJson ? parseJson(text) : parseCsv(text);
 
   if (!rows.length) {
     showModal(
