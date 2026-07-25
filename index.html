@@ -51,10 +51,11 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="format-detection" content="telephone=no" />
-    <script data-cf-async="false" src="https://cdn.tailwindcss.com"></script>
-    <script data-cf-async="false">
-      tailwind.config = { darkMode: "class" };
-    </script>
+    <!-- Compiled Tailwind (static CSS). Replaces the runtime Play CDN, which
+         is not production-grade and broke behind Cloudflare Rocket Loader.
+         Rebuild after changing markup/classes:
+         npx tailwindcss@3.4.17 -c tailwind.config.js -i src/input.css -o styles.css --minify -->
+    <link rel="stylesheet" href="styles.css" />
     <script data-cf-async="false" src="env.js"></script>
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
@@ -73,10 +74,15 @@
         position: fixed;
         inset: 0;
         background-color: rgba(0, 0, 0, 0.5);
-        display: flex;
         justify-content: center;
         align-items: center;
         z-index: 1000;
+      }
+      /* Only lay out with flex when shown; when the .hidden utility is
+         present the modal must stay display:none regardless of stylesheet
+         order. Gating display here avoids fighting Tailwind's .hidden. */
+      .modal-overlay:not(.hidden) {
+        display: flex;
       }
       .modal-content {
         padding: 2rem;
