@@ -1,4 +1,4 @@
-const CACHE_NAME = "debt-tracker-v1";
+const CACHE_NAME = "debt-tracker-v2";
 const APP_SHELL = ["./", "./index.html", "./app.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", (event) => {
