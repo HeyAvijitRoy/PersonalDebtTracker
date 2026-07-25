@@ -10,6 +10,20 @@ Legend: ✅ shipped to `main` (live) · 🚧 on a branch, not yet merged ·
 
 ## 2026-07-25
 
+### ✅ Phase 4 signed off + README refreshed — branch `lock-mode`
+- Lock Mode (E2EE) **manually tested against live Firebase** — full flow passed
+  (passphrase setup, add/edit/delete, sign out, unlock, and legacy→ciphertext
+  migration verified in the console). Phase 4 marked ready to merge.
+- `README.md` rewritten to reflect the current app: Lock Mode / E2EE, dark mode,
+  Payoff Schedule Simulator, CSV + JSON import, search, quick nudges, yearly
+  interest tile + overall utilization bar, compiled Tailwind (no CDN),
+  network-first service worker, version-controlled `firestore.rules`, updated
+  data model (encrypted envelope + `meta/crypto`), a "Switching Firebase
+  Projects" guide, and a refreshed roadmap.
+- `project-plan.md` Phase 4 status updated to "tested, ready to merge."
+- **At merge:** deploy `firestore.rules` to the Firebase project so the
+  server-side lockdown goes live with the code.
+
 ### 🚧 🔒 Firestore security rules + project docs — branch `lock-mode`
 - Added version-controlled [`firestore.rules`](firestore.rules): owner-only
   access (`request.auth.uid == userId`) across each user's subtree, with shape

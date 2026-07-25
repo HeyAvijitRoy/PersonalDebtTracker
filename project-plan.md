@@ -32,7 +32,7 @@ already shipped, see [`project-status.md`](project-status.md).
 | 1 | UX & accessibility overhaul | ✅ Done |
 | 2 | Planning tools & robustness | ✅ Done |
 | 3 | Production hardening | ✅ Done |
-| 4 | Lock Mode (E2EE) + security rules | 🚧 In review (`lock-mode` branch) |
+| 4 | Lock Mode (E2EE) + security rules | ✅ Tested, ready to merge (`lock-mode`) |
 | 5 | Trust & onboarding (guest mode, App Check) | ⏳ Planned |
 | 6 | Data-model depth (payoff timeline, multi-currency) | ⏳ Planned |
 | 7 | Distribution, SEO & rebrand | ⏳ Planned |
@@ -70,10 +70,10 @@ clickable empty-state CTAs, and persisted sort/view preferences.
   robust behind Cloudflare Rocket Loader, no runtime cost, no prod warning.
 - Missing PWA files (`manifest.webmanifest`, `sw.js`, `icon.svg`) added.
 
-## 🚧 Phase 4 — Lock Mode (client-side E2EE) — *in review*
+## ✅ Phase 4 — Lock Mode (client-side E2EE) — *tested, ready to merge*
 
-Branch: `lock-mode` (built and locally verified; awaiting maintainer testing
-against live Firebase before merge to `main`).
+Branch: `lock-mode` (built, locally verified, and manually tested against live
+Firebase — all flows passed; ready to merge to `main`).
 
 - AES-GCM-256 with a key derived from a user passphrase via PBKDF2
   (SHA-256, 210k iterations); key held in memory only, cleared on
@@ -87,12 +87,16 @@ against live Firebase before merge to `main`).
 - Version-controlled [`firestore.rules`](firestore.rules) (owner-only access,
   shape validation for both card forms + the meta doc).
 
-**Remaining before merge**
+**Completed**
 
-- [ ] Maintainer end-to-end test on live Firebase (setup → add/edit → sign out
-      → unlock → confirm migration to ciphertext in the console).
-- [ ] Deploy `firestore.rules` to the Firebase project.
-- [ ] Update README security-rules / data-model sections to reflect E2EE.
+- [x] Maintainer end-to-end test on live Firebase (setup → add/edit → sign out
+      → unlock → migration to ciphertext) — all passed.
+- [x] README updated for E2EE (data model, security rules, Lock Mode section).
+
+**At merge / deploy**
+
+- [ ] Deploy `firestore.rules` to the Firebase project (Console → Rules →
+      Publish) so the server-side lockdown is live alongside the merge.
 
 ---
 
