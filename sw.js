@@ -1,5 +1,5 @@
 const CACHE_NAME = "debt-tracker-v1";
-const APP_SHELL = ["/", "/index.html", "/app.js", "/manifest.webmanifest", "/icon.svg"];
+const APP_SHELL = ["./", "./index.html", "./app.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

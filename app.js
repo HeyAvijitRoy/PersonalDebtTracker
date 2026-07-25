@@ -1832,7 +1832,7 @@ if (navSections.length && "IntersectionObserver" in window) {
 // PWA SW registration (enables offline app-shell caching)
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch(() => {});
+    navigator.serviceWorker.register("sw.js").catch(() => {});
   });
 }
 
