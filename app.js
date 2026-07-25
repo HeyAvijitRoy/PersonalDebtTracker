@@ -578,6 +578,9 @@ function setupFirestoreListener(uid) {
     },
     (error) => {
       console.error("[Firestore] onSnapshot error:", error);
+      // Ignore errors that arrive after sign-out (e.g. permission-denied as
+      // the listener tears down) — don't resurrect the data view.
+      if (!userId) return;
       appLoading?.classList.add("hidden");
       mainApp?.classList.remove("hidden");
       showModal(
@@ -1923,11 +1926,33 @@ googleSigninBtn?.addEventListener("click", async () => {
 
 signOutBtn?.addEventListener("click", async () => {
   try {
+    // Tear down the live listener FIRST so it can't fire a post-sign-out
+    // permission error that would re-show the data view.
+    if (unsubscribe) {
+      unsubscribe();
+      unsubscribe = null;
+    }
+    // Clear in-memory state and keys.
+    window.__latestCards = [];
+    firstSnapshotReceived = false;
+    editingId = null;
+    cryptoKey = null;
+    currentCryptoMeta = null;
+
     await signOut(auth);
+
+    // Switch straight back to the sign-in screen immediately, rather than
+    // waiting on the onAuthStateChanged callback.
+    mainApp?.classList.add("hidden");
+    lockSection?.classList.add("hidden");
+    appLoading?.classList.add("hidden");
+    authSection?.classList.remove("hidden");
+
     setHeaderAuthUI(false);
     if (noCardsMessage) {
       noCardsMessage.classList.remove("hidden");
-      noCardsMessage.textContent = "No accounts added yet. Click to add your first account.";
+      noCardsMessage.textContent =
+        "No accounts added yet. Click to add your first account.";
     }
     cardList && (cardList.innerHTML = "");
     totalDebtDisplay && (totalDebtDisplay.textContent = `$0.00`);
@@ -1937,7 +1962,6 @@ signOutBtn?.addEventListener("click", async () => {
     accountsMeta && (accountsMeta.textContent = "");
     form?.reset();
     applyFieldErrors({}, TOP_FORM_FIELD_MAP);
-    editingId = null;
   } catch (err) {
     console.error("[Auth] Sign-out failed:", err);
   }
