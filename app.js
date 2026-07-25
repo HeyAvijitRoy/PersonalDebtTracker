@@ -232,7 +232,6 @@ const appId = firebaseConfig.projectId;
 // lives in memory only and is cleared on sign-out / refresh (unlock per session).
 let cryptoKey = null; // in-memory CryptoKey; null until unlocked this session
 let currentCryptoMeta = null; // loaded meta doc for the signed-in user
-let migrationRunning = false;
 const PBKDF2_ITERATIONS = 210000;
 const VERIFY_TOKEN = "pdt-lock-mode-verify-v1";
 const textEnc = new TextEncoder();
@@ -284,17 +283,17 @@ async function encryptFields(fields) {
 }
 
 // Decrypt a raw Firestore card document back to plaintext fields.
-// Legacy (pre-Lock-Mode) plaintext docs are returned as-is so the app keeps
-// working during migration.
+// All cards are encrypted envelopes { v, iv, data }; anything else is treated
+// as an error (surfaced by the caller) rather than silently coerced.
 async function decryptFields(raw) {
-  const isEncrypted = raw && raw.data !== undefined && raw.iv !== undefined;
-  if (!isEncrypted) {
-    return {
-      name: raw?.name ?? "",
-      balance: +raw?.balance || 0,
-      apr: +raw?.apr || 0,
-      creditLimit: +raw?.creditLimit || 0,
-    };
+  if (!cryptoKey) throw new Error("Locked: no encryption key in memory.");
+  if (
+    !raw ||
+    raw.v !== 1 ||
+    typeof raw.iv !== "string" ||
+    typeof raw.data !== "string"
+  ) {
+    throw new Error("Malformed or unrecognized card document.");
   }
   const iv = fromB64(raw.iv);
   const ct = fromB64(raw.data);
@@ -351,29 +350,6 @@ async function unlockWithPassphrase(meta, passphrase) {
   return true;
 }
 
-// Re-encrypt any legacy plaintext docs in place (same doc id). Idempotent and
-// resumable: the read path handles both forms, so a partial run is safe.
-async function migrateLegacyDocs(uid, docs) {
-  if (migrationRunning || !cryptoKey) return;
-  const legacy = docs.filter((d) => {
-    const x = d.data();
-    return x && x.data === undefined && x.name !== undefined;
-  });
-  if (!legacy.length) return;
-  migrationRunning = true;
-  const cardsCollection = collection(db, `artifacts/${appId}/users/${uid}/cards`);
-  try {
-    for (const d of legacy) {
-      const x = d.data();
-      await setDoc(doc(cardsCollection, d.id), await encryptFields(x));
-    }
-    console.log(`[Crypto] Encrypted ${legacy.length} legacy card(s).`);
-  } catch (e) {
-    console.error("[Crypto] Migration failed:", e);
-  } finally {
-    migrationRunning = false;
-  }
-}
 
 // ====== LOCK MODE UI FLOW ======
 function showLockSetup() {
@@ -572,9 +548,6 @@ function setupFirestoreListener(uid) {
       }
 
       renderAll(window.__latestCards);
-
-      // Encrypt any legacy plaintext docs in place (idempotent).
-      migrateLegacyDocs(uid, snapshot.docs);
     },
     (error) => {
       console.error("[Firestore] onSnapshot error:", error);

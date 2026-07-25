@@ -90,14 +90,14 @@ encrypted in the browser** before it ever reaches Firestore.
 artifacts/{projectId}/users/{uid}/cards/{cardId}
 ```
 
-**Encrypted (Lock Mode — default):**
+**Encrypted (all cards):**
 
 ```json
 { "v": 1, "iv": "<base64>", "data": "<base64-ciphertext>" }
 ```
 
-Legacy plaintext docs (`{ name, balance, apr, creditLimit }`) from before Lock
-Mode are read as-is and re-encrypted in place on load (idempotent, resumable).
+Cards are encrypted-only — the app writes and reads this envelope exclusively;
+malformed or unrecognized documents are rejected rather than shown.
 
 **Per-user crypto metadata:**
 
@@ -128,7 +128,7 @@ project admins / server backups cannot read card details.
   sign-out/refresh.
 * **First run:** set a passphrase (with an unrecoverable-if-lost warning).
   **Returning:** enter your passphrase to unlock.
-* **Encrypt-everything-by-default**, with safe migration of any legacy plaintext.
+* **Encrypt-everything-by-default** — every card is stored as ciphertext.
 
 **Threat model**
 
@@ -188,8 +188,9 @@ broke behind Cloudflare Rocket Loader.)
 
 The authoritative rules live in [`firestore.rules`](firestore.rules) (version
 controlled). They enforce **owner-only** access (`request.auth.uid == uid`)
-across each user's subtree and validate both the encrypted and legacy card
-shapes plus the `meta/crypto` doc; everything else is denied by default.
+across each user's subtree and strictly validate the encrypted card envelope and
+the `meta/crypto` doc (exact keys, types, and size bounds); everything else —
+including any other `/meta` doc or the user container doc — is denied by default.
 
 **Deploy:** Firebase Console → Firestore → Rules → paste `firestore.rules` →
 **Publish** (or `firebase deploy --only firestore:rules` with the Firebase CLI).

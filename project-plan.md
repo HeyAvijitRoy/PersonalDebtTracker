@@ -82,8 +82,8 @@ Firebase — all flows passed; ready to merge to `main`).
   token to detect wrong passphrases cleanly.
 - Encrypt/decrypt only at the Firestore boundary; in-memory data stays
   plaintext so all existing features are untouched.
-- Encrypt-everything-by-default with **safe, idempotent migration** of legacy
-  plaintext docs.
+- Encrypt-everything-by-default; cards are encrypted-only (no legacy plaintext
+  support — malformed/unrecognized docs are rejected, not coerced).
 - Version-controlled [`firestore.rules`](firestore.rules) (owner-only access,
   shape validation for both card forms + the meta doc).
 

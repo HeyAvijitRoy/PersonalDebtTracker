@@ -10,6 +10,26 @@ Legend: ✅ shipped to `main` (live) · 🚧 on a branch, not yet merged ·
 
 ## 2026-07-25
 
+### 🚧 🔒 PR-review hardening: encrypted-only, stricter rules — branch `lock-mode`
+Addressed code-review feedback and dropped legacy support entirely (the switch
+is to a fresh Firebase project, so there is no plaintext data to migrate):
+- **Removed all legacy plaintext handling** — deleted `migrateLegacyDocs` and
+  the migration call; `decryptFields` no longer falls back to plaintext.
+- **`decryptFields` is strict:** requires a non-null key and an exact
+  `{ v:1, iv:string, data:string }` shape, otherwise throws (surfaced by the
+  read loop) instead of silently coercing to plaintext defaults.
+- **`firestore.rules` tightened:**
+  - `isValidCard` now `hasOnly(['v','iv','data'])` + `v == 1` + typed,
+    size-bounded `iv`/`data` (no extra fields, no legacy branch).
+  - `isValidMeta` now validates `v`, restricts keys, and validates the
+    `verifier` map down to its `iv`/`data` subfields (typed + size-bounded).
+  - `/meta/{docId}` locked down to just `/meta/crypto`.
+  - Removed the permissive `allow read, write` on the user container doc — it's
+    unused and now denied by default.
+- Docs (README / plan) updated to describe encrypted-only (no migration).
+- Verified locally: encrypt/decrypt round-trips; legacy-shaped and malformed
+  docs are rejected; no boot errors.
+
 ### ✅ Phase 4 signed off + README refreshed — branch `lock-mode`
 - Lock Mode (E2EE) **manually tested against live Firebase** — full flow passed
   (passphrase setup, add/edit/delete, sign out, unlock, and legacy→ciphertext

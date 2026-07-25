@@ -2,10 +2,9 @@ rules_version = '2';
 
 // Firestore security rules for Personal Debt Tracker.
 //
-// Data model:
+// Data model (encrypted-only; no legacy plaintext):
 //   artifacts/{project}/users/{uid}/cards/{cardId}
-//     - Encrypted (Lock Mode):  { v, iv, data }
-//     - Legacy plaintext:       { name, balance, apr, creditLimit }
+//     - { v, iv, data }              (AES-GCM envelope)
 //   artifacts/{project}/users/{uid}/meta/crypto
 //     - { v, salt, verifier: { iv, data } }
 //
@@ -24,30 +23,32 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == userId;
     }
 
-    // A card doc must be one of the two known shapes; reject anything else so
-    // a compromised client can't write arbitrary/oversized junk.
+    // A card doc must be exactly the encrypted envelope — only these keys,
+    // correctly typed and size-bounded — so a compromised client can't write
+    // arbitrary, extra, or oversized fields.
     function isValidCard(d) {
-      return
-        // Encrypted envelope (Lock Mode).
-        (d.keys().hasAll(['iv', 'data'])
-          && d['iv'] is string && d['iv'].size() <= 64
-          && d['data'] is string && d['data'].size() <= 8192)
-        ||
-        // Legacy plaintext (pre-Lock-Mode; migrated to encrypted on load).
-        (d.keys().hasAll(['name'])
-          && d['name'] is string && d['name'].size() <= 200);
+      return d.keys().hasOnly(['v', 'iv', 'data'])
+        && d.v == 1
+        && d['iv'] is string && d['iv'].size() <= 64
+        && d['data'] is string && d['data'].size() <= 8192;
     }
 
-    // The per-user crypto meta doc (salt + passphrase verifier).
+    // The per-user crypto meta doc: salt + passphrase verifier, fully validated
+    // down to the verifier subfields.
     function isValidMeta(d) {
-      return d.keys().hasAll(['salt', 'verifier'])
-        && d['salt'] is string && d['salt'].size() <= 128;
+      return d.keys().hasOnly(['v', 'salt', 'verifier'])
+        && d.v == 1
+        && d['salt'] is string && d['salt'].size() <= 128
+        && d['verifier'] is map
+        && d['verifier'].keys().hasOnly(['iv', 'data'])
+        && d['verifier']['iv'] is string && d['verifier']['iv'].size() <= 64
+        && d['verifier']['data'] is string && d['verifier']['data'].size() <= 1024;
     }
 
     match /artifacts/{project}/users/{userId} {
 
-      // The user container doc itself (if ever written directly).
-      allow read, write: if isOwner(userId);
+      // The user container doc itself is never used; deny direct access by
+      // not declaring an allow rule here.
 
       match /cards/{cardId} {
         allow read, delete: if isOwner(userId);
@@ -55,14 +56,14 @@ service cloud.firestore {
           && isValidCard(request.resource.data);
       }
 
-      match /meta/{docId} {
-        allow read: if isOwner(userId);
+      // Only the single crypto meta doc is permitted under /meta.
+      match /meta/crypto {
+        allow read, delete: if isOwner(userId);
         allow create, update: if isOwner(userId)
           && isValidMeta(request.resource.data);
-        allow delete: if isOwner(userId);
       }
 
-      // Any other subcollection under the user is denied by default.
+      // Any other doc/subcollection under the user is denied by default.
     }
 
     // All paths outside the per-user subtree are denied by default.
