@@ -1,303 +1,296 @@
 # Personal Debt Tracker
 
-Track credit card balances, see true monthly interest burn, get FICO “threshold nudge” hints, and plan 0% balance transfers — all in a clean, offline-friendly web app powered by Firebase.
+Track credit-card balances, see the true monthly (and yearly) interest burn, get
+FICO "threshold nudge" hints, simulate payoff timelines, and plan 0% balance
+transfers — in a clean, mobile-first web app where your data is **end-to-end
+encrypted in the browser** before it ever reaches Firestore.
 
-
-> A lightweight, privacy-conscious planner to manage credit cards, visualize utilization, and optimize balance transfers. Built for real-world, mobile-first use.
+> A lightweight, privacy-first planner to manage credit cards, visualize
+> utilization, and optimize payoff. No bank linking, no tracking, no ads.
 
 <p>
   <img alt="Firebase" src="https://img.shields.io/badge/Firebase-Auth%20|%20Firestore-ffca28?logo=firebase&logoColor=000&labelColor=fff" />
-  <img alt="Tailwind" src="https://img.shields.io/badge/TailwindCSS-utility%20first-38bdf8?logo=tailwindcss&logoColor=fff" />
+  <img alt="Tailwind" src="https://img.shields.io/badge/TailwindCSS-compiled-38bdf8?logo=tailwindcss&logoColor=fff" />
+  <img alt="E2EE" src="https://img.shields.io/badge/Encryption-AES--GCM%20(client--side)-4c1?logo=letsencrypt&logoColor=fff" />
   <img alt="PWA" src="https://img.shields.io/badge/PWA-offline%20first-5a0fc8?logo=googlechrome&logoColor=fff" />
   <img alt="GitHub Pages" src="https://img.shields.io/badge/GitHub%20Pages-Actions%20deploy-222?logo=github&logoColor=fff" />
 </p>
 
-[![GitHub Pages](https://img.shields.io/badge/demo-GitHub%20Pages-blue)](https://heyavijitroy.github.io/PersonalDebtTracker/)
-
-## ✨ Features
-
-* **Auth + Sync**: Google sign-in with Firestore syncing (offline-first).
-* **Inline edit**: Edit accounts in-place (row expands to full-width inputs).
-  Save/Cancel buttons + *Enter to save*, *Esc to cancel*.
-* **Smart visuals**:
-
-  * Dynamic font fit for long account names (stays on one line).
-  * Utilization **bar or donut** view (toggle).
-  * Risk badges (Healthy / Watch / Medium / High).
-  * **0% APR** chips surfaced directly on cards.
-* **FICO “threshold nudges”**: Cheapest dollars to drop to hit **30%/50%/80%** per-card + overall minimums.
-* **Strategies**:
-
-  * **Debt Avalanche** (highest APR first)
-  * **Debt Snowball** (lowest balance first)
-  * **Most Expensive** (interest per \$100 ranking)
-* **Balance-Transfer Optimizer**:
-
-  * Dropdown to pick target 0% card, optional cap utilization on target.
-  * Calculates move list, monthly savings, intro-period net savings vs. fees.
-  * **Reset** button to clear inputs/results.
-* **Quality of life**:
-
-  * **Undo delete** (5-second toast).
-  * **Export** CSV/JSON.
-  * **PWA**: installable, offline-first (‘view & add’ work offline; syncs when online).
-  * **Mobile-first** responsive layout.
-  * Accessibility: keyboard support, focus rings, ARIA labels, high-contrast chips.
+[![Live demo](https://img.shields.io/badge/demo-pdt.avijitroy.com-blue)](https://pdt.avijitroy.com/)
 
 > ⚠️ **Disclaimer**: For educational purposes. Not financial advice.
 
 ---
 
-## 🧱 Tech Stack
+## ✨ Features
 
-* **Frontend**: HTML + TailwindCSS (no build step required).
-* **State/Sync**: Firebase Auth + Firestore (with IndexedDB persistence).
-* **PWA**: Service worker + install prompt.
-* **CI/CD**: GitHub Actions → GitHub Pages.
-* **Secrets**: Injected at build time via Actions (no keys in repo).
+### 🔒 Privacy & security
+* **Lock Mode — client-side end-to-end encryption.** Card data is encrypted in
+  your browser with an AES-GCM key derived from your passphrase (PBKDF2). Only
+  ciphertext is ever stored in Firestore — unreadable even by the project owner
+  without your passphrase.
+* **Zero-knowledge, per-session unlock.** The key lives in memory only and is
+  cleared on sign-out/refresh; the passphrase is never sent anywhere. No bank
+  linking, no tracking, no ads.
+
+### 💳 Accounts
+* **Google sign-in + Firestore sync** (offline-first via IndexedDB).
+* **Inline edit** in place (row expands to full-width inputs; *Enter* to save,
+  *Esc* to cancel) with field-level validation.
+* **Quick ±$50 balance nudges** on each card for fast payment updates.
+* **Search / filter** accounts by name; **undo delete** (8-second toast).
+* **Sort** by Name / APR / Balance / Utilization / Interest per $100
+  (preference persisted).
+
+### 📊 Insight & visuals
+* **KPI tiles:** Total Debt, Total Credit, Monthly Interest, and a prominent
+  **Yearly Interest (Est.)** figure, plus an **overall utilization bar**.
+* **Per-card utilization** as **bar or donut** (toggle), risk badges
+  (Healthy / Watch / Medium / High), and **0% APR** chips.
+* **FICO "threshold nudges":** cheapest dollars to drop under 30% / 50% / 80%
+  utilization, per-card and overall.
+
+### 🧮 Planning tools
+* **Payoff strategies:** Debt Avalanche (highest APR), Debt Snowball (lowest
+  balance), and Most Expensive (interest per $100).
+* **Payoff Schedule Simulator:** enter a monthly budget + strategy to get an
+  estimated debt-free date, total interest paid, and payoff order.
+* **Balance-Transfer Optimizer:** pick a 0% target card, optionally cap its
+  utilization, and get a move list with monthly + intro-period net savings vs.
+  fees.
+
+### 🧰 Quality of life
+* **Dark mode** (persisted, no flash of wrong theme).
+* **Import** CSV **and** JSON; **Export** CSV / JSON.
+* **PWA:** installable, offline-friendly (network-first service worker; Firestore
+  queues writes offline and syncs when back online).
+* **Accessibility:** keyboard support, focus rings, ARIA labels, `aria-live`
+  announcements, accessible modal (focus trap + Escape/backdrop close), and
+  redundant text labels alongside color-coded chips.
+* **Mobile-first** responsive layout with a floating add-account button.
 
 ---
 
-## 🚀 Live Demo
+## 🧱 Tech Stack
 
-* Deployed via **GitHub Pages** using Actions.
-* Keys are supplied at build time (see below). `env.js` is generated on the server—**never committed**.
+* **Frontend:** HTML + vanilla JS (ES modules) + **compiled TailwindCSS**
+  (static `styles.css`, no runtime CDN).
+* **Encryption:** Web Crypto API — AES-GCM-256 + PBKDF2 (SHA-256).
+* **State/Sync:** Firebase Auth + Firestore (with IndexedDB persistence).
+* **PWA:** service worker (network-first) + web manifest.
+* **CI/CD:** GitHub Actions → GitHub Pages (served via Cloudflare at
+  `pdt.avijitroy.com`).
+* **Secrets:** injected at build time via Actions — no keys committed.
 
 ---
 
 ## 📦 Data Model
 
-```json
-artifacts/{projectId}/users/{uid}/cards/{cardId} = {
-  "name": "Amex",
-  "balance": 3697.15,
-  "apr": 29.24,
-  "creditLimit": 4000
-}
+```
+artifacts/{projectId}/users/{uid}/cards/{cardId}
 ```
 
-* Derived metrics: utilization, monthly interest, interest per \$100.
-* All calculations happen **client-side**.
+**Encrypted (all cards):**
+
+```json
+{ "v": 1, "iv": "<base64>", "data": "<base64-ciphertext>" }
+```
+
+Cards are encrypted-only — the app writes and reads this envelope exclusively;
+malformed or unrecognized documents are rejected rather than shown.
+
+**Per-user crypto metadata:**
+
+```
+artifacts/{projectId}/users/{uid}/meta/crypto
+```
+
+```json
+{ "v": 1, "salt": "<base64>", "verifier": { "iv": "<base64>", "data": "<base64>" } }
+```
+
+* The `salt` (non-secret) derives the key via PBKDF2; the `verifier` is an
+  encrypted known token used to detect a wrong passphrase on unlock.
+* Decrypted card fields (`name`, `balance`, `apr`, `creditLimit`) exist **only
+  in memory**; all derived metrics (utilization, interest, per-$100 cost) are
+  computed client-side.
+
+---
+
+## 🔐 Lock Mode (client-side E2EE)
+
+**Goal:** data is encrypted in the browser before hitting Firestore, so even
+project admins / server backups cannot read card details.
+
+* **Key derivation:** AES-GCM-256 key from your passphrase + a per-user random
+  salt via PBKDF2 (SHA-256, 210k iterations).
+* **Session model:** unlock once per session; key held in memory, cleared on
+  sign-out/refresh.
+* **First run:** set a passphrase (with an unrecoverable-if-lost warning).
+  **Returning:** enter your passphrase to unlock.
+* **Encrypt-everything-by-default** — every card is stored as ciphertext.
+
+**Threat model**
+
+* ✅ Protects against server-side reads (console, backups) and cross-user access.
+* ❌ Does **not** protect a device compromised while unlocked.
+* ⚠️ **No recovery** if the passphrase is lost — export a JSON backup as your
+  safety net.
 
 ---
 
 ## 🛠️ Getting Started (Local)
 
 1. **Firebase Console**
-
-   * Create a web app and enable **Google** provider.
+   * Create a web app and enable the **Google** auth provider.
    * Auth → **Authorized domains**: add `localhost` and `127.0.0.1`.
-   * Firestore → set **Security Rules** (see sample below).
+   * Firestore → publish the rules from [`firestore.rules`](firestore.rules).
 
 2. **Create `env.js` locally** *(ignored by git)*:
 
-```js
-// env.js (local only; NOT committed)
-window.__FIREBASE_CONFIG = {
-  apiKey: "…",
-  authDomain: "your-project.firebaseapp.com",
-  projectId: "your-project",
-  storageBucket: "your-project.firebasestorage.app",
-  messagingSenderId: "…",
-  appId: "…",
-  measurementId: "G-…"
-};
-```
+   ```js
+   // env.js (local only; NOT committed)
+   window.__FIREBASE_CONFIG = {
+     apiKey: "…",
+     authDomain: "your-project.firebaseapp.com",
+     projectId: "your-project",
+     storageBucket: "your-project.firebasestorage.app",
+     messagingSenderId: "…",
+     appId: "…",
+     measurementId: "G-…"
+   };
+   ```
 
-3. **Ensure load order in `index.html`** (in `<head>`):
+3. **Serve over HTTP** (not `file://`, so ES modules + the service worker work):
 
-```html
-<script src="env.js"></script>           <!-- must load first -->
-<script type="module" src="app.js"></script>
-```
+   ```bash
+   npx serve .
+   # or
+   python -m http.server 5173
+   ```
 
-4. **Run locally** (serve over HTTP, not file://):
+### Rebuilding the CSS
+
+Tailwind is **precompiled** to a static `styles.css` (committed to the repo).
+Rebuild it whenever you change markup or class names in `index.html` / `app.js`:
 
 ```bash
-npx serve .
-# or
-python3 -m http.server 5173
+npx tailwindcss@3.4.17 -c tailwind.config.js -i src/input.css -o styles.css --minify
 ```
+
+The content scanner reads `index.html` and `app.js`, so any class used there is
+included. (The old Tailwind Play CDN was removed — it isn't production-grade and
+broke behind Cloudflare Rocket Loader.)
 
 ---
 
-## 🔐 Security Rules (example)
+## 🔐 Security Rules
 
+The authoritative rules live in [`firestore.rules`](firestore.rules) (version
+controlled). They enforce **owner-only** access (`request.auth.uid == uid`)
+across each user's subtree and strictly validate the encrypted card envelope and
+the `meta/crypto` doc (exact keys, types, and size bounds); everything else —
+including any other `/meta` doc or the user container doc — is denied by default.
 
-```js
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /artifacts/{project}/users/{uid}/cards/{cardId} {
-      allow read, write: if request.auth.uid == uid;
-    }
-  }
-}
-```
-
-* This prevents cross-user access.
-* Future consideration: Adding field validations with **Rules** or **App Check** later for abuse protection.
+**Deploy:** Firebase Console → Firestore → Rules → paste `firestore.rules` →
+**Publish** (or `firebase deploy --only firestore:rules` with the Firebase CLI).
 
 ---
 
-## 🌐 Deploying to GitHub Pages (No Keys in Repo)
+## 🌐 Deploying to GitHub Pages (no keys in repo)
 
-**Why**: Avoids scanners flagging your repo and keeps config out of version control.
+**Why**: keeps config out of version control.
 
-1. **Add GitHub Actions Secrets**
-   Repo → Settings → *Secrets and variables* → **Actions** → New repository secret:
+1. **Add GitHub Actions secrets** (repo → Settings → Secrets and variables →
+   Actions):
 
-```
-FIREBASE_API_KEY
-FIREBASE_AUTH_DOMAIN
-FIREBASE_PROJECT_ID
-FIREBASE_STORAGE_BUCKET
-FIREBASE_MESSAGING_SENDER_ID
-FIREBASE_APP_ID
-FIREBASE_MEASUREMENT_ID
-```
+   ```
+   FIREBASE_API_KEY
+   FIREBASE_AUTH_DOMAIN
+   FIREBASE_PROJECT_ID
+   FIREBASE_STORAGE_BUCKET
+   FIREBASE_MESSAGING_SENDER_ID
+   FIREBASE_APP_ID
+   FIREBASE_MEASUREMENT_ID
+   ```
 
-2. **Ignore local `env.js`**
+2. **`env.js` is gitignored** and generated at build time by
+   `.github/workflows/static.yml`, which rsyncs the repo into `dist/`, writes
+   `dist/env.js` from the secrets, and deploys to Pages.
 
-```gitignore
-env.js
-```
+3. **Settings → Pages** → build with **GitHub Actions**.
 
-3. **Workflow** `.github/workflows/static.yml` generates `env.js` at build time:
+> `styles.css` is committed, so no build step runs in CI — the workflow just
+> copies files. Rebuild the CSS locally (see above) and commit it when needed.
 
-```yaml
-name: Deploy to GitHub Pages
-on:
-  push: { branches: [ main ] }
-  workflow_dispatch:
-permissions: { contents: read, pages: write, id-token: write }
-concurrency: { group: "pages", cancel-in-progress: true }
+---
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build static site
-        run: |
-          mkdir -p dist
-          rsync -av --delete --exclude ".git*" --exclude ".github" --exclude "env.js" ./ dist/
-      - name: Generate env.js from secrets
-        run: |
-          cat > dist/env.js << 'EOF'
-          window.__FIREBASE_CONFIG = {
-            apiKey: "${{ secrets.FIREBASE_API_KEY }}",
-            authDomain: "${{ secrets.FIREBASE_AUTH_DOMAIN }}",
-            projectId: "${{ secrets.FIREBASE_PROJECT_ID }}",
-            storageBucket: "${{ secrets.FIREBASE_STORAGE_BUCKET }}",
-            messagingSenderId: "${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}",
-            appId: "${{ secrets.FIREBASE_APP_ID }}",
-            measurementId: "${{ secrets.FIREBASE_MEASUREMENT_ID }}"
-          };
-          EOF
-      - uses: actions/upload-pages-artifact@v3
-        with: { path: dist }
-  deploy:
-    runs-on: ubuntu-latest
-    needs: build
-    environment: { name: github-pages, url: ${{ steps.deployment.outputs.page_url }} }
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
-```
+## 🔄 Switching Firebase Projects
 
-4. **Settings → Pages** → Build with **GitHub Actions**.
+To repoint the app at a new Firebase project (e.g. a different owner account):
+
+1. **Export JSON** from the current app (your migration payload / backup).
+2. Create the new project → add a Web app → enable Google auth → create
+   Firestore → publish [`firestore.rules`](firestore.rules) → add authorized
+   domains (`localhost`, `127.0.0.1`, `pdt.avijitroy.com`).
+3. Update config: local `env.js` and the GitHub Actions secrets above.
+4. Sign in with the account you'll use going forward, set your Lock Mode
+   passphrase, then **Import** the JSON.
+5. Verify, then decommission the old project.
+
+Test locally against the new project before updating the production secrets.
 
 ---
 
 ## 🧭 Usage Notes
 
-* **Sort** by Name / APR / Balance / Utilization / Interest per \$100.
-* **Utilization View**: switch **Bar ↔ Pie** (donut) in the controls.
-* **Inline edit**: click ✏️ → fields expand to separate rows for typing comfort.
-* **Undo delete**: 5-sec toast with **Undo**.
-* **Export**: CSV / JSON from the header action.
-* **Optimizer**:
-
-  * Select the **0% target card** from dropdown.
-  * Optionally set **Cap Utilization** for target to avoid “maxed” optics.
-  * Shows move list + net savings (intro vs fee).
-
----
-
-## ♿ Accessibility
-
-* Keyboard: **Enter** saves, **Esc** cancels in edit mode.
-* Buttons have **ARIA labels**, focus rings.
-* Color coding includes redundant text labels (e.g., “Healthy / High”).
+* **Sort** by Name / APR / Balance / Utilization / Interest per $100 (persisted).
+* **Utilization View**: switch **Bar ↔ Donut** in the controls.
+* **Inline edit**: click ✏️ → fields expand; **Enter** saves, **Esc** cancels.
+* **Quick pay**: ±$50 buttons for fast balance updates; **Undo delete** toast.
+* **Simulator**: enter a monthly budget + strategy → debt-free date, total
+  interest, payoff order.
+* **Optimizer**: pick the 0% target card, optionally cap its utilization → move
+  list + net savings (intro vs. fees).
+* **Import/Export**: CSV or JSON from the header.
 
 ---
 
 ## 📱 PWA & Offline
 
-* Works offline for most flows; queued writes sync when back online.
-* To reset offline cache (dev): DevTools → Application → Clear storage.
-
----
-
-## 🔮 Future Scope — **Client-Side Encryption (“Lock Mode”)**
-
-**Goal**: data is encrypted in the browser before hitting Firestore, so even project admins cannot read card details.
-
-### Threat Model
-
-* Protects against server-side reads (e.g., console, backups).
-* Does **not** protect if a user’s device is compromised while unlocked.
-
-### Approach
-
-* **Passphrase-based** key derivation (no keys stored on server).
-* Use **Web Crypto API**; derive an AES-GCM key from passphrase + random salt with PBKDF2 (or scrypt/Argon2id via WASM).
-* Encrypt/decrypt per-document fields client-side.
-
-### Data Envelope (versioned)
-
-```json
-{
-  "v": 1,
-  "alg": "AES-GCM",
-  "salt": "<base64>",
-  "iv": "<base64>",
-  "ct": "<base64-ciphertext>"
-}
-```
-
-### UX
-
-* User toggles **Lock Mode** → sets a passphrase (never sent to server).
-* We derive a key in memory; cache it per-session (optional persist in WebCrypto keystore via `crypto.subtle.wrapKey` with platform credentials).
-* **No recovery** if passphrase is lost.
-
-
-### Trade-offs
-
-* No server-side querying on encrypted fields (we can keep small derived non-sensitive indices if needed).
-* Key recovery is user responsibility.
+* Installable; works offline for most flows. The service worker is
+  **network-first** (always serves the latest deploy, falls back to cache
+  offline), and Firestore queues writes offline and syncs when reconnected.
+* To reset cache (dev): DevTools → Application → Clear storage, then hard-reload.
 
 ---
 
 ## 🧭 Roadmap
 
-* [ ] Lock Mode (E2EE) as described above.
-* [ ] Multi-currency support.
-* [ ] Custom payoff schedule simulator (timeline + amortization).
-* [ ] CSV import wizard.
-* [ ] App Check (re-enable with Recaptcha v3 site key).
-* [ ] Theming & color-blind safe palettes.
+See [`project-plan.md`](project-plan.md) for the full phased plan and
+[`project-status.md`](project-status.md) for a dated change log.
+
+* [x] Lock Mode (client-side E2EE)
+* [x] Payoff schedule simulator
+* [x] CSV / JSON import
+* [x] Dark mode
+* [ ] Guest / local-only mode (try before sign-in)
+* [ ] Firebase App Check (reCAPTCHA v3)
+* [ ] Multi-currency support
+* [ ] Automated tests for the financial math + CI gates
 
 ---
 
 ## 🧩 Troubleshooting
 
-* **Google popup blocked** - falls back to redirect; ensure *Authorized domains* has `localhost` / `127.0.0.1`.
-* **Nothing happens** - check that `env.js` loads before `app.js` (Network tab).
-* **Stale UI** - unregister service worker and hard-reload.
-* **“Permission denied”** - recheck Firestore rules.
+* **Google popup blocked** — falls back to redirect; ensure *Authorized domains*
+  includes `localhost` / `127.0.0.1`.
+* **Nothing happens** — check that `env.js` loads before `app.js` (Network tab).
+* **Forgot passphrase** — data is unrecoverable by design; re-import a JSON
+  backup, or reset by deleting the `meta/crypto` doc and your cards.
+* **"Permission denied"** — recheck the deployed Firestore rules.
+* **Stale UI** — the network-first SW self-heals on reload; if needed, clear
+  storage and hard-reload.
 
 ---
 
@@ -307,7 +300,5 @@ jobs:
 
 ---
 
-**Questions / ideas?** Open an issue or ping me—happy to iterate.
-
----
-Built with ❤️ by Avijit Roy.
+Built with ❤️ by [Avijit Roy](https://avijitroy.com). Questions or ideas? Open an
+issue.

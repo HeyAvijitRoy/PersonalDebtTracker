@@ -1,0 +1,71 @@
+rules_version = '2';
+
+// Firestore security rules for Personal Debt Tracker.
+//
+// Data model (encrypted-only; no legacy plaintext):
+//   artifacts/{project}/users/{uid}/cards/{cardId}
+//     - { v, iv, data }              (AES-GCM envelope)
+//   artifacts/{project}/users/{uid}/meta/crypto
+//     - { v, salt, verifier: { iv, data } }
+//
+// Deploy:
+//   - Firebase Console → Firestore → Rules → paste this file → Publish, OR
+//   - firebase deploy --only firestore:rules   (requires firebase.json + CLI)
+//
+// Principle: a signed-in user can read/write ONLY documents under their own
+// uid. Everything else is denied by the absence of a matching allow rule.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // True only for the authenticated owner of this uid subtree.
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // A card doc must be exactly the encrypted envelope — only these keys,
+    // correctly typed and size-bounded — so a compromised client can't write
+    // arbitrary, extra, or oversized fields.
+    function isValidCard(d) {
+      return d.keys().hasOnly(['v', 'iv', 'data'])
+        && d.v == 1
+        && d['iv'] is string && d['iv'].size() <= 64
+        && d['data'] is string && d['data'].size() <= 8192;
+    }
+
+    // The per-user crypto meta doc: salt + passphrase verifier, fully validated
+    // down to the verifier subfields.
+    function isValidMeta(d) {
+      return d.keys().hasOnly(['v', 'salt', 'verifier'])
+        && d.v == 1
+        && d['salt'] is string && d['salt'].size() <= 128
+        && d['verifier'] is map
+        && d['verifier'].keys().hasOnly(['iv', 'data'])
+        && d['verifier']['iv'] is string && d['verifier']['iv'].size() <= 64
+        && d['verifier']['data'] is string && d['verifier']['data'].size() <= 1024;
+    }
+
+    match /artifacts/{project}/users/{userId} {
+
+      // The user container doc itself is never used; deny direct access by
+      // not declaring an allow rule here.
+
+      match /cards/{cardId} {
+        allow read, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && isValidCard(request.resource.data);
+      }
+
+      // Only the single crypto meta doc is permitted under /meta.
+      match /meta/crypto {
+        allow read, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && isValidMeta(request.resource.data);
+      }
+
+      // Any other doc/subcollection under the user is denied by default.
+    }
+
+    // All paths outside the per-user subtree are denied by default.
+  }
+}
