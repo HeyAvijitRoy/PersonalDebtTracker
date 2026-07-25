@@ -1,0 +1,18 @@
+{
+  "name": "Personal Debt Tracker",
+  "short_name": "Debt Tracker",
+  "description": "Track credit card debt and plan payoff strategies (Avalanche, Snowball, Balance Transfer).",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f3f4f6",
+  "theme_color": "#0ea5e9",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
