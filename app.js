@@ -5,17 +5,28 @@ const avalancheList = document.getElementById("avalanche-list");
 const snowballList = document.getElementById("snowball-list");
 const expensiveList = document.getElementById("expensive-list");
 const noCardsMessage = document.getElementById("no-cards-message");
-const cardIdInput = document.getElementById("card-id");
 const submitBtn = document.getElementById("submit-btn");
 const totalDebtDisplay = document.getElementById("total-debt");
 const totalCreditLineDisplay = document.getElementById("total-credit-line");
 const totalMonthlyInterestDisplay = document.getElementById(
   "total-monthly-interest"
 );
+const totalYearlyInterestDisplay = document.getElementById(
+  "total-yearly-interest"
+);
+const overallUtilBar = document.getElementById("overall-util-bar");
+const overallUtilText = document.getElementById("overall-util-text");
 const accountsMeta = document.getElementById("accounts-meta");
+const accountSearchInput = document.getElementById("account-search");
+const importCsvBtn = document.getElementById("import-csv-btn");
+const importCsvInput = document.getElementById("import-csv-input");
+const simBudgetInput = document.getElementById("sim-budget");
+const simStrategySelect = document.getElementById("sim-strategy");
+const simRunBtn = document.getElementById("sim-run");
 
 // Auth / modal
 const authSection = document.getElementById("auth-section");
+const appLoading = document.getElementById("app-loading");
 const mainApp = document.getElementById("main-app");
 const googleSigninBtn = document.getElementById("google-signin-btn");
 const signOutBtn = document.getElementById("sign-out-btn");
@@ -25,6 +36,8 @@ const messageModal = document.getElementById("message-modal");
 const modalTitle = document.getElementById("modal-title");
 const modalMessage = document.getElementById("modal-message");
 const modalCloseBtn = document.getElementById("modal-close-btn");
+const liveRegion = document.getElementById("live-region");
+const themeToggleBtn = document.getElementById("theme-toggle");
 
 // Controls
 const sortBySelect = document.getElementById("sort-by");
@@ -39,11 +52,45 @@ const btTargetInput = document.getElementById("bt-target-name"); // legacy text 
 
 let db, auth, userId;
 let unsubscribe;
+
+// Restore saved sort/view preferences (if any) before reading initial state
+try {
+  const savedSortBy = localStorage.getItem("prefSortBy");
+  const savedSortDir = localStorage.getItem("prefSortDir");
+  const savedUtilView = localStorage.getItem("prefUtilView");
+  if (savedSortBy && sortBySelect) sortBySelect.value = savedSortBy;
+  if (savedSortDir && sortDirBtn) {
+    sortDirBtn.dataset.dir = savedSortDir;
+    sortDirBtn.textContent = savedSortDir === "asc" ? "Asc" : "Desc";
+  }
+  if (savedUtilView && utilViewSelect) utilViewSelect.value = savedUtilView;
+} catch (e) {}
+
 let sortBy = sortBySelect?.value || "name";
 let sortDir = sortDirBtn?.dataset.dir || "desc";
 let utilView = utilViewSelect?.value || "bar";
 let editingId = null;
+let firstSnapshotReceived = false;
+let searchQuery = "";
 window.__latestCards = [];
+
+// ====== NAV HELPERS ======
+window.focusAddForm = () => {
+  const nameInput = document.getElementById("card-name");
+  nameInput?.scrollIntoView({ behavior: "smooth", block: "center" });
+  nameInput?.focus();
+};
+
+// ====== THEME ======
+function setTheme(isDark) {
+  document.documentElement.classList.toggle("dark", isDark);
+  try {
+    localStorage.setItem("theme", isDark ? "dark" : "light");
+  } catch (e) {}
+}
+themeToggleBtn?.addEventListener("click", () => {
+  setTheme(!document.documentElement.classList.contains("dark"));
+});
 
 // ====== AUTH UI ======
 function setHeaderAuthUI(isSignedIn, displayName = "") {
@@ -59,20 +106,64 @@ function setHeaderAuthUI(isSignedIn, displayName = "") {
 setHeaderAuthUI(false);
 
 // ====== MODAL & TOAST ======
-function showModal(title, message) {
+let modalTriggerEl = null;
+
+function trapModalTab(e) {
+  if (e.key === "Escape") {
+    e.preventDefault();
+    closeModal();
+    return;
+  }
+  if (e.key !== "Tab") return;
+  const focusable = messageModal.querySelectorAll(
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+  );
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault();
+    first.focus();
+  }
+}
+
+function showModal(title, message, triggerEl = document.activeElement) {
   if (!messageModal) return alert(`${title}\n\n${message}`);
+  modalTriggerEl = triggerEl instanceof HTMLElement ? triggerEl : null;
   modalTitle.textContent = title;
   modalMessage.textContent = message;
   messageModal.classList.remove("hidden");
+  document.addEventListener("keydown", trapModalTab);
+  modalCloseBtn?.focus();
 }
-modalCloseBtn?.addEventListener("click", () =>
-  messageModal?.classList.add("hidden")
-);
+
+function closeModal() {
+  messageModal?.classList.add("hidden");
+  document.removeEventListener("keydown", trapModalTab);
+  if (modalTriggerEl && modalTriggerEl.isConnected) modalTriggerEl.focus();
+  modalTriggerEl = null;
+}
+modalCloseBtn?.addEventListener("click", closeModal);
+messageModal?.addEventListener("click", (e) => {
+  if (e.target === messageModal) closeModal();
+});
+
+function announce(message) {
+  if (!liveRegion) return;
+  liveRegion.textContent = "";
+  requestAnimationFrame(() => {
+    liveRegion.textContent = message;
+  });
+}
 
 function toast(message, duration = 1800) {
+  announce(message);
   const t = document.createElement("div");
   t.className =
-    "fixed bottom-4 right-4 z-[1100] bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-lg opacity-0 transition-opacity";
+    "fixed bottom-4 right-4 z-[1100] bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-lg ring-1 ring-white/10 opacity-0 transition-opacity";
   t.textContent = message;
   document.body.appendChild(t);
   requestAnimationFrame(() => {
@@ -117,7 +208,7 @@ if (!firebaseConfig || !firebaseConfig.apiKey) {
   // Add a visible banner so it’s obvious in UI
   const warn = document.createElement("div");
   warn.className =
-    "max-w-5xl mx-auto my-3 p-3 rounded border bg-amber-50 text-amber-800";
+    "max-w-5xl mx-auto my-3 p-3 rounded border bg-amber-50 dark:bg-amber-950/40 dark:border-amber-900 text-amber-800 dark:text-amber-300";
   warn.textContent =
     "Missing Firebase config. Did you include env.js before app.js?";
   document.body.prepend(warn);
@@ -152,8 +243,10 @@ function initFirebase() {
     onAuthStateChanged(auth, (user) => {
       if (user) {
         userId = user.uid;
+        firstSnapshotReceived = false;
         authSection?.classList.add("hidden");
-        mainApp?.classList.remove("hidden");
+        mainApp?.classList.add("hidden");
+        appLoading?.classList.remove("hidden");
         authStatus && (authStatus.textContent = "");
         setHeaderAuthUI(true, user.displayName);
         setupFirestoreListener(user.uid);
@@ -161,6 +254,7 @@ function initFirebase() {
         userId = null;
         authSection?.classList.remove("hidden");
         mainApp?.classList.add("hidden");
+        appLoading?.classList.add("hidden");
         setHeaderAuthUI(false);
       }
     });
@@ -188,9 +282,24 @@ function setupFirestoreListener(uid) {
       window.__latestCards = fetchedCards.map((x) => ({ ...x }));
       if (editingId && !window.__latestCards.find((c) => c.id === editingId))
         editingId = null;
+
+      if (!firstSnapshotReceived) {
+        firstSnapshotReceived = true;
+        appLoading?.classList.add("hidden");
+        mainApp?.classList.remove("hidden");
+      }
+
       renderAll(window.__latestCards);
     },
-    (error) => console.error("[Firestore] onSnapshot error:", error)
+    (error) => {
+      console.error("[Firestore] onSnapshot error:", error);
+      appLoading?.classList.add("hidden");
+      mainApp?.classList.remove("hidden");
+      showModal(
+        "Sync error",
+        "Lost connection to your data. Changes may not be up to date — try refreshing."
+      );
+    }
   );
 }
 
@@ -200,6 +309,8 @@ const USD = new Intl.NumberFormat("en-US", {
   currency: "USD",
 });
 const fmtMoney = (n) => USD.format(+n || 0);
+const ESCAPE_MAP = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+const escapeHtml = (str) => String(str ?? "").replace(/[&<>"']/g, (m) => ESCAPE_MAP[m]);
 const monthlyInterest = (balance, aprPct) =>
   !balance || !aprPct ? 0 : (balance * (aprPct / 100)) / 12;
 const interestPer100 = (aprPct) => (!aprPct ? 0 : monthlyInterest(100, aprPct));
@@ -226,12 +337,12 @@ function computeCardUtilization(card) {
 }
 function riskBadge(util) {
   if (util > 80)
-    return '<span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">>80% High</span>';
+    return '<span class="inline-block text-[10px] px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300">&gt;80% High</span>';
   if (util > 50)
-    return '<span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">>50% Medium</span>';
+    return '<span class="inline-block text-[10px] px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300">&gt;50% Medium</span>';
   if (util > 30)
-    return '<span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700">>30% Watch</span>';
-  return '<span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Healthy</span>';
+    return '<span class="inline-block text-[10px] px-2 py-0.5 rounded-full bg-yellow-100 dark:bg-yellow-950/50 text-yellow-700 dark:text-yellow-300">&gt;30% Watch</span>';
+  return '<span class="inline-block text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300">Healthy</span>';
 }
 function rankByInterestPer100(cards) {
   return cards
@@ -389,14 +500,56 @@ function planBalanceTransfer(
   };
 }
 
-// Dynamic font size
-function nameFontClass(name = "") {
-  const len = (name || "").length;
-  if (len <= 22) return "text-base";
-  if (len <= 28) return "text-[0.95rem]";
-  if (len <= 34) return "text-[0.90rem]";
-  if (len <= 40) return "text-[0.85rem]";
-  return "text-[0.80rem]";
+// Payoff schedule simulator
+function simulatePayoff(cards, monthlyBudget, strategy) {
+  const MAX_MONTHS = 600; // 50-year safety cap
+  let working = cards
+    .map((c) => ({ name: c.name, balance: +c.balance || 0, apr: +c.apr || 0 }))
+    .filter((c) => c.balance > 0);
+
+  if (!working.length) return { months: 0, totalInterest: 0, payoffOrder: [] };
+
+  const budget = Math.max(0, +monthlyBudget || 0);
+  let totalInterest = 0;
+  let months = 0;
+  const payoffOrder = [];
+
+  while (working.length && months < MAX_MONTHS) {
+    months++;
+    for (const c of working) {
+      const interest = monthlyInterest(c.balance, c.apr);
+      c.balance += interest;
+      totalInterest += interest;
+    }
+    const order =
+      strategy === "snowball"
+        ? [...working].sort((a, b) => a.balance - b.balance)
+        : [...working].sort((a, b) => b.apr - a.apr);
+
+    let remaining = budget;
+    for (const c of order) {
+      if (remaining <= 0) break;
+      const pay = Math.min(remaining, c.balance);
+      c.balance -= pay;
+      remaining -= pay;
+    }
+    working = working.filter((c) => {
+      if (c.balance <= 0.01) {
+        payoffOrder.push({ name: c.name, month: months });
+        return false;
+      }
+      return true;
+    });
+  }
+
+  if (working.length) {
+    return {
+      error:
+        "This budget isn't enough to pay off your balances within 50 years — try a higher monthly amount.",
+      payoffOrder,
+    };
+  }
+  return { months, totalInterest, payoffOrder };
 }
 
 // Sorting
@@ -441,6 +594,80 @@ function sortCardsGeneric(cards) {
   return arr;
 }
 
+// ====== VALIDATION ======
+function validateCardInput({ name, balance, apr, creditLimit }) {
+  const errors = {};
+  if (!name) errors.name = "Enter an account name.";
+  else if (name.length > 60) errors.name = "Keep the name under 60 characters.";
+  if (Number.isNaN(balance) || balance < 0)
+    errors.balance = "Enter a balance of 0 or more.";
+  if (Number.isNaN(apr) || apr < 0 || apr > 99.99)
+    errors.apr = "Enter an APR between 0 and 99.99.";
+  if (Number.isNaN(creditLimit) || creditLimit < 0)
+    errors.creditLimit = "Enter a credit limit of 0 or more.";
+  return errors;
+}
+
+const INVALID_INPUT_CLASSES = ["border-rose-500", "dark:border-rose-500", "focus:ring-rose-500"];
+
+function applyFieldErrors(errors, fieldMap) {
+  let firstInvalid = null;
+  for (const key of Object.keys(fieldMap)) {
+    const input = fieldMap[key].input();
+    const errorEl = fieldMap[key].error();
+    if (!input) continue;
+    const message = errors[key];
+    if (message) {
+      if (errorEl) {
+        errorEl.textContent = message;
+        errorEl.classList.remove("hidden");
+      }
+      input.classList.add(...INVALID_INPUT_CLASSES);
+      input.setAttribute("aria-invalid", "true");
+      if (!firstInvalid) firstInvalid = input;
+    } else {
+      if (errorEl) {
+        errorEl.textContent = "";
+        errorEl.classList.add("hidden");
+      }
+      input.classList.remove(...INVALID_INPUT_CLASSES);
+      input.removeAttribute("aria-invalid");
+    }
+  }
+  return firstInvalid;
+}
+
+const TOP_FORM_FIELD_MAP = {
+  name: {
+    input: () => document.getElementById("card-name"),
+    error: () => document.getElementById("err-card-name"),
+  },
+  balance: {
+    input: () => document.getElementById("balance"),
+    error: () => document.getElementById("err-balance"),
+  },
+  apr: {
+    input: () => document.getElementById("apr"),
+    error: () => document.getElementById("err-apr"),
+  },
+  creditLimit: {
+    input: () => document.getElementById("limit"),
+    error: () => document.getElementById("err-limit"),
+  },
+};
+
+["card-name", "balance", "apr", "limit"].forEach((id) => {
+  const key = id === "card-name" ? "name" : id === "limit" ? "creditLimit" : id;
+  document.getElementById(id)?.addEventListener("input", () => {
+    const input = TOP_FORM_FIELD_MAP[key].input();
+    const errorEl = TOP_FORM_FIELD_MAP[key].error();
+    if (!errorEl || errorEl.classList.contains("hidden")) return;
+    errorEl.classList.add("hidden");
+    input.classList.remove(...INVALID_INPUT_CLASSES);
+    input.removeAttribute("aria-invalid");
+  });
+});
+
 // ====== RENDERERS ======
 function renderAll(cards) {
   populateBtDropdown(cards);
@@ -458,19 +685,45 @@ function renderCards(cards) {
     totalCreditLineDisplay.textContent = fmtMoney(limit);
   if (totalMonthlyInterestDisplay)
     totalMonthlyInterestDisplay.textContent = fmtMoney(monthly);
+  if (totalYearlyInterestDisplay)
+    totalYearlyInterestDisplay.textContent = fmtMoney(monthly * 12);
+  if (overallUtilBar) {
+    const pct = Math.max(0, Math.min(100, util));
+    overallUtilBar.style.width = `${pct}%`;
+    overallUtilBar.className =
+      "h-2.5 rounded-full transition-all " +
+      (pct <= 30 ? "bg-emerald-500" : pct <= 50 ? "bg-amber-500" : "bg-rose-500");
+  }
+  if (overallUtilText) overallUtilText.textContent = `${util.toFixed(1)}%`;
   if (accountsMeta)
     accountsMeta.textContent = cards.length
-      ? `Overall Utilization: ${util.toFixed(1)}% • Accounts: ${cards.length}`
+      ? `Accounts: ${cards.length}`
       : "";
 
   cardList.innerHTML = "";
   if (!cards.length) {
-    if (noCardsMessage) noCardsMessage.style.display = "block";
+    if (noCardsMessage) {
+      noCardsMessage.classList.remove("hidden");
+      noCardsMessage.textContent = "No accounts added yet. Click to add your first account.";
+    }
     return;
   }
-  if (noCardsMessage) noCardsMessage.style.display = "none";
 
-  const sorted = sortCardsGeneric(cards);
+  const query = searchQuery.trim().toLowerCase();
+  const filtered = query
+    ? cards.filter((c) => (c.name || "").toLowerCase().includes(query))
+    : cards;
+
+  if (!filtered.length) {
+    if (noCardsMessage) {
+      noCardsMessage.classList.remove("hidden");
+      noCardsMessage.textContent = `No accounts match “${searchQuery.trim()}”. Click to add a new account.`;
+    }
+    return;
+  }
+  if (noCardsMessage) noCardsMessage.classList.add("hidden");
+
+  const sorted = sortCardsGeneric(filtered);
   sorted.forEach((card) => {
     const balance = +card.balance || 0;
     const apr = +card.apr || 0;
@@ -486,40 +739,51 @@ function renderCards(cards) {
     const isEditing = editingId === card.id;
 
     const el = document.createElement("div");
-    el.className = "bg-white p-4 rounded-lg shadow-sm border border-gray-100";
+    el.className =
+      "debt-card group bg-white dark:bg-gray-900 p-4 rounded-lg shadow-sm border border-gray-100 dark:border-gray-800 hover:shadow-md transition-shadow";
 
     if (!isEditing) {
       el.innerHTML = `
         <div class="flex items-start justify-between">
           <div class="min-w-0">
-            <h3 class="name-fit font-semibold text-gray-900 flex items-center whitespace-nowrap overflow-hidden text-ellipsis ${nameFontClass(
-              card.name
-            )}" title="${card.name}">
-              ${card.name} ${riskBadge(utilization)}
+            <h3 class="name-fit text-base font-semibold text-gray-900 dark:text-gray-100" title="${escapeHtml(card.name)}">
+              ${escapeHtml(card.name)}
             </h3>
-            <div class="mt-1 grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-gray-600">
-              <p>Balance: <span class="font-semibold text-gray-900">${fmtMoney(
+            <div class="mt-1">${riskBadge(utilization)}</div>
+            <div class="mt-1 grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-gray-600 dark:text-gray-400">
+              <p>Balance: <span class="font-semibold text-gray-900 dark:text-gray-100">${fmtMoney(
                 balance
               )}</span></p>
               <p>APR:
-                <span class="font-semibold text-gray-900">${apr.toFixed(
+                <span class="font-semibold text-gray-900 dark:text-gray-100">${apr.toFixed(
                   2
                 )}%</span>
                 ${
                   apr <= 0.01
-                    ? '<span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">0% APR</span>'
+                    ? '<span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300">0% APR</span>'
                     : ""
                 }
               </p>
-              <p>Limit: <span class="font-semibold text-gray-900">${fmtMoney(
+              <p>Limit: <span class="font-semibold text-gray-900 dark:text-gray-100">${fmtMoney(
                 creditLimit
               )}</span></p>
-              <p>Monthly Interest: <span class="font-semibold text-gray-900">${fmtMoney(
+              <p>Monthly Interest: <span class="font-semibold text-gray-900 dark:text-gray-100">${fmtMoney(
                 monthlyInt
               )}</span></p>
             </div>
+            <div class="mt-2 flex items-center gap-2">
+              <span class="text-xs text-gray-500 dark:text-gray-400">Quick pay:</span>
+              <button
+                class="nudge-btn text-xs px-2 py-1 rounded-md border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                data-id="${card.id}" data-delta="-50" ${balance <= 0 ? "disabled" : ""} aria-label="Decrease balance by $50"
+              >−$50</button>
+              <button
+                class="nudge-btn text-xs px-2 py-1 rounded-md border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+                data-id="${card.id}" data-delta="50" aria-label="Increase balance by $50"
+              >+$50</button>
+            </div>
           </div>
-          <div class="flex gap-2 shrink-0">
+          <div class="flex gap-2 shrink-0 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity">
             <button
               class="inline-edit-btn w-9 h-9 flex items-center justify-center rounded-full bg-sky-600 text-white hover:bg-sky-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 transition-colors"
               data-id="${card.id}" title="Edit" aria-label="Edit">
@@ -539,17 +803,17 @@ function renderCards(cards) {
 
         <div class="mt-3">
           <div class="flex items-center justify-between mb-1">
-            <p class="text-sm text-gray-700">Utilization: <span class="font-semibold">${utilization.toFixed(
+            <p class="text-sm text-gray-700 dark:text-gray-300">Utilization: <span class="font-semibold">${utilization.toFixed(
               1
             )}%</span></p>
-            <p class="text-xs text-gray-400">View: ${utilView.toUpperCase()}</p>
+            <p class="text-xs text-gray-400 dark:text-gray-500">View: ${utilView.toUpperCase()}</p>
           </div>
 
           ${
             utilView === "pie"
               ? donut(utilization)
               : `
-            <div class="w-full bg-gray-200 rounded-full h-2.5">
+            <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
               <div class="${utilColor} h-2.5 rounded-full" style="width:${Math.min(
                   100,
                   utilization
@@ -562,34 +826,35 @@ function renderCards(cards) {
     } else {
       el.innerHTML = `
         <div class="flex items-start justify-between">
-          <div class="min-w-0">
-            <h3 class="name-fit font-semibold text-gray-900 flex items-center whitespace-nowrap overflow-hidden text-ellipsis ${nameFontClass(
-              card.name
-            )}" title="${card.name}">
-              ${
-                card.name
-              } <span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">Editing</span>
+          <div class="min-w-0 flex-1">
+            <h3 class="name-fit text-base font-semibold text-gray-900 dark:text-gray-100" title="${escapeHtml(card.name)}">
+              ${escapeHtml(card.name)}
             </h3>
+            <div class="mt-1"><span class="inline-block text-[10px] px-2 py-0.5 rounded-full bg-sky-100 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300">Editing</span></div>
             <div class="mt-3 space-y-3 text-sm">
               <label class="block">
-                <span class="text-gray-600">Balance ($)</span>
-                <input data-field="balance" type="number" step="0.01" min="0" value="${balance}"
-                       class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-sky-500"/>
+                <span class="text-gray-600 dark:text-gray-400">Balance ($)</span>
+                <input data-field="balance" type="number" inputmode="decimal" step="0.01" min="0" value="${balance}"
+                       class="w-full mt-1 px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-sky-500"/>
+                <p class="field-error hidden text-xs text-rose-600 dark:text-rose-400 mt-1" data-error-for="balance"></p>
               </label>
               <label class="block">
-                <span class="text-gray-600">APR (%)</span>
-                <input data-field="apr" type="number" step="0.01" min="0" max="99.99" value="${apr}"
-                       class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-sky-500"/>
+                <span class="text-gray-600 dark:text-gray-400">APR (%)</span>
+                <input data-field="apr" type="number" inputmode="decimal" step="0.01" min="0" max="99.99" value="${apr}"
+                       class="w-full mt-1 px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-sky-500"/>
+                <p class="field-error hidden text-xs text-rose-600 dark:text-rose-400 mt-1" data-error-for="apr"></p>
               </label>
               <label class="block">
-                <span class="text-gray-600">Limit ($)</span>
-                <input data-field="creditLimit" type="number" step="0.01" min="0" value="${creditLimit}"
-                       class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-sky-500"/>
+                <span class="text-gray-600 dark:text-gray-400">Limit ($)</span>
+                <input data-field="creditLimit" type="number" inputmode="decimal" step="0.01" min="0" value="${creditLimit}"
+                       class="w-full mt-1 px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-sky-500"/>
+                <p class="field-error hidden text-xs text-rose-600 dark:text-rose-400 mt-1" data-error-for="creditLimit"></p>
               </label>
               <label class="block">
-                <span class="text-gray-600">Name</span>
-                <input data-field="name" type="text" value="${card.name}"
-                       class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-sky-500"/>
+                <span class="text-gray-600 dark:text-gray-400">Name</span>
+                <input data-field="name" type="text" value="${escapeHtml(card.name)}"
+                       class="w-full mt-1 px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-sky-500"/>
+                <p class="field-error hidden text-xs text-rose-600 dark:text-rose-400 mt-1" data-error-for="name"></p>
               </label>
             </div>
           </div>
@@ -597,12 +862,12 @@ function renderCards(cards) {
             <button class="save-inline-btn px-3 py-1.5 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500" data-id="${
               card.id
             }">Save</button>
-            <button class="cancel-inline-btn px-3 py-1.5 text-xs bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors focus-visible:ring-2 focus-visible:ring-gray-400" data-id="${
+            <button class="cancel-inline-btn px-3 py-1.5 text-xs bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-100 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors focus-visible:ring-2 focus-visible:ring-gray-400" data-id="${
               card.id
             }">Cancel</button>
           </div>
         </div>
-        <div class="mt-3 text-xs text-gray-500">
+        <div class="mt-3 text-xs text-gray-500 dark:text-gray-400">
           Tip: Press <span class="font-semibold">Enter</span> to save or <span class="font-semibold">Esc</span> to cancel.
         </div>
       `;
@@ -618,14 +883,16 @@ function donut(util) {
   const filled = c * (pct / 100);
   const remaining = c - filled;
   const color = util <= 30 ? "#10b981" : util <= 50 ? "#f59e0b" : "#ef4444";
+  const isDark = document.documentElement.classList.contains("dark");
+  const trackColor = isDark ? "#374151" : "#e5e7eb";
   return `
     <div class="flex items-center gap-3">
-      <svg width="56" height="56" viewBox="0 0 48 48" role="img" aria-label="Utilization donut">
-        <circle cx="24" cy="24" r="${r}" stroke="#e5e7eb" stroke-width="6" fill="none"/>
+      <svg width="56" height="56" viewBox="0 0 48 48" role="img" aria-label="Utilization: ${pct.toFixed(1)}%">
+        <circle cx="24" cy="24" r="${r}" stroke="${trackColor}" stroke-width="6" fill="none"/>
         <circle cx="24" cy="24" r="${r}" stroke="${color}" stroke-width="6" fill="none"
                 stroke-dasharray="${filled} ${remaining}" transform="rotate(-90 24 24)"/>
       </svg>
-      <span class="text-sm text-gray-700">${pct.toFixed(1)}%</span>
+      <span class="text-sm text-gray-700 dark:text-gray-300">${pct.toFixed(1)}%</span>
     </div>
   `;
 }
@@ -641,27 +908,24 @@ function renderStrategy(cards, strategy) {
   target.innerHTML = "";
   if (!cards.length) {
     target.innerHTML =
-      '<p class="text-gray-500">Add accounts to see the payoff plan.</p>';
+      '<button type="button" onclick="focusAddForm()" class="text-gray-500 dark:text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 hover:underline transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded">Add accounts to see the payoff plan.</button>';
     return;
   }
   sorted.forEach((card, idx) => {
     const el = document.createElement("div");
-    el.className = "p-3 bg-white rounded-md shadow-sm border border-gray-200";
+    el.className =
+      "p-3 bg-white dark:bg-gray-900 rounded-md shadow-sm border border-gray-200 dark:border-gray-800";
     el.innerHTML = `
-      <div class="flex items-center justify-between">
-        <div class="flex items-center min-w-0">
-          <span class="text-lg font-bold text-gray-600 w-6">${idx + 1}.</span>
-          <p class="ml-2 font-medium text-gray-900 whitespace-nowrap overflow-hidden text-ellipsis ${nameFontClass(
-            card.name
-          )}" title="${card.name}">
-            ${card.name}
-          </p>
-        </div>
-        <p class="text-xs text-gray-500">Bal ${fmtMoney(
-          +card.balance || 0
-        )} • APR ${(+card.apr || 0).toFixed(
+      <div class="flex items-start gap-2">
+        <span class="text-lg font-bold text-gray-600 dark:text-gray-400 w-6 shrink-0">${idx + 1}.</span>
+        <div class="min-w-0 flex-1">
+          <p class="font-medium text-gray-900 dark:text-gray-100 break-words leading-snug">${escapeHtml(card.name)}</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Bal ${fmtMoney(
+            +card.balance || 0
+          )} • APR ${(+card.apr || 0).toFixed(
       2
     )}% • Util ${computeCardUtilization(card).toFixed(0)}%</p>
+        </div>
       </div>
     `;
     target.appendChild(el);
@@ -674,26 +938,24 @@ function renderExpensive(cards) {
   expensiveList.innerHTML = "";
   if (!ranked.length) {
     expensiveList.innerHTML =
-      '<p class="text-gray-500">Add accounts to see per-$100 cost ranking.</p>';
+      '<button type="button" onclick="focusAddForm()" class="text-gray-500 dark:text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 hover:underline transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded">Add accounts to see per-$100 cost ranking.</button>';
     return;
   }
   ranked.slice(0, 6).forEach((r, i) => {
     const row = document.createElement("div");
     row.className =
-      "p-3 bg-white rounded-md shadow-sm border border-gray-200 flex items-center justify-between";
+      "p-3 bg-white dark:bg-gray-900 rounded-md shadow-sm border border-gray-200 dark:border-gray-800 flex items-start justify-between gap-3";
     row.innerHTML = `
-      <div class="flex items-center min-w-0">
-        <span class="text-lg font-bold text-gray-600 w-6">${i + 1}.</span>
+      <div class="flex items-start min-w-0">
+        <span class="text-lg font-bold text-gray-600 dark:text-gray-400 w-6 shrink-0">${i + 1}.</span>
         <div class="ml-2 min-w-0">
-          <p class="font-medium text-gray-900 whitespace-nowrap overflow-hidden text-ellipsis ${nameFontClass(
-            r.name
-          )}" title="${r.name}">${r.name}</p>
-          <p class="text-xs text-gray-500">APR ${r.apr.toFixed(
+          <p class="font-medium text-gray-900 dark:text-gray-100 break-words leading-snug">${escapeHtml(r.name)}</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">APR ${r.apr.toFixed(
             2
           )}% • Balance ${fmtMoney(r.balance)}</p>
         </div>
       </div>
-      <span class="text-sm font-semibold text-rose-700">${fmtMoney(
+      <span class="text-sm font-semibold text-rose-700 dark:text-rose-400 shrink-0">${fmtMoney(
         r.per100
       )}/$100</span>
     `;
@@ -707,7 +969,7 @@ function renderFicoHints(cards) {
   box.innerHTML = "";
   if (!cards.length) {
     box.innerHTML =
-      '<p class="text-gray-500">Add accounts to see utilization thresholds and “nudge” amounts.</p>';
+      '<button type="button" onclick="focusAddForm()" class="text-gray-500 dark:text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 hover:underline transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded">Add accounts to see utilization thresholds and “nudge” amounts.</button>';
     return;
   }
   const { util } = computeTotals(cards);
@@ -723,67 +985,72 @@ function renderFicoHints(cards) {
     to30Overall,
   } = computeFicoHints(cards);
 
+  const thresholdTile = (label, count, minToTame) => {
+    const theme = count
+      ? "bg-rose-50 dark:bg-rose-950/30 border-rose-100 dark:border-rose-900 text-rose-700 dark:text-rose-400"
+      : "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-100 dark:border-emerald-900 text-emerald-700 dark:text-emerald-400";
+    return `
+      <div class="rounded-lg p-3 border ${theme}">
+        <p class="text-xs uppercase tracking-wide opacity-80">Cards ${label}</p>
+        <p class="text-xl font-bold">${count}</p>
+        ${
+          count
+            ? `<p class="text-xs mt-1 opacity-90">Min to tame: ${fmtMoney(minToTame)}</p>`
+            : `<p class="text-xs mt-1 opacity-90">All clear</p>`
+        }
+      </div>
+    `;
+  };
+
   const summary = document.createElement("div");
   summary.className =
-    "p-3 bg-white rounded-md shadow-sm border border-gray-200";
+    "p-3 bg-white dark:bg-gray-900 rounded-md shadow-sm border border-gray-200 dark:border-gray-800";
   summary.innerHTML = `
-    <p><span class="font-medium">Overall Utilization:</span> ${util.toFixed(
-      1
-    )}%</p>
-    <p class="mt-1 flex flex-wrap gap-x-4 gap-y-1 items-center">
-      <span>Cards >80%:
-        <span class="font-semibold ${
-          over80 ? "text-rose-600" : "text-emerald-600"
-        }">${over80}</span>
-        <span class="ml-2 text-xs text-gray-500">Min to tame: ${fmtMoney(
-          sumTo80
-        )}</span>
-      </span>
-      <span>>50%:
-        <span class="font-semibold ${
-          over50 ? "text-amber-600" : "text-emerald-600"
-        }">${over50}</span>
-        <span class="ml-2 text-xs text-gray-500">Min to tame: ${fmtMoney(
-          sumTo50
-        )}</span>
-      </span>
-      <span>>30%:
-        <span class="font-semibold ${
-          over30 ? "text-yellow-600" : "text-emerald-600"
-        }">${over30}</span>
-        <span class="ml-2 text-xs text-gray-500">Min to tame: ${fmtMoney(
-          sumTo30
-        )}</span>
-      </span>
-    </p>
-    <p class="mt-1 text-xs text-gray-500">Overall dollars to reach target utilization — to 50%: <span class="font-semibold text-gray-700">${fmtMoney(
-      to50Overall
-    )}</span> • to 30%: <span class="font-semibold text-gray-700">${fmtMoney(
-    to30Overall
-  )}</span></p>
+    <div class="flex items-center justify-between mb-3">
+      <span class="text-sm text-gray-600 dark:text-gray-400">Overall Utilization</span>
+      <span class="text-lg font-bold text-gray-900 dark:text-gray-100">${util.toFixed(1)}%</span>
+    </div>
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      ${thresholdTile("&gt;80%", over80, sumTo80)}
+      ${thresholdTile("&gt;50%", over50, sumTo50)}
+      ${thresholdTile("&gt;30%", over30, sumTo30)}
+    </div>
+    <div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400 flex flex-wrap gap-x-4 gap-y-1">
+      <span>To reach 50% overall: <span class="font-semibold text-gray-700 dark:text-gray-300">${fmtMoney(
+        to50Overall
+      )}</span></span>
+      <span>To reach 30% overall: <span class="font-semibold text-gray-700 dark:text-gray-300">${fmtMoney(
+        to30Overall
+      )}</span></span>
+    </div>
   `;
   box.appendChild(summary);
 
   if (nudges.length) {
     const list = document.createElement("div");
-    list.className = "mt-3 flex flex-wrap gap-2";
+    list.className = "mt-3 space-y-2";
     const title = document.createElement("p");
-    title.className = "w-full font-medium";
+    title.className = "font-medium";
     title.textContent = "Cheapest “threshold nudges” (FICO optics):";
     list.appendChild(title);
 
     nudges.slice(0, 8).forEach((n) => {
-      const chip = document.createElement("span");
-      chip.className = "text-xs px-2 py-1 rounded-full border bg-white";
-      chip.textContent = `${n.name}: ${n.currentUtil.toFixed(1)}% → ${
-        n.nextThreshold
-      }% • Pay ${fmtMoney(n.dollarsToDrop)}`;
-      list.appendChild(chip);
+      const row = document.createElement("div");
+      row.className =
+        "flex items-start justify-between gap-3 p-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900";
+      row.innerHTML = `
+        <div class="min-w-0">
+          <p class="text-sm font-medium text-gray-900 dark:text-gray-100 break-words leading-snug">${escapeHtml(n.name)}</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">${n.currentUtil.toFixed(1)}% → ${n.nextThreshold}%</p>
+        </div>
+        <span class="text-sm font-semibold text-sky-700 dark:text-sky-400 shrink-0">Pay ${fmtMoney(n.dollarsToDrop)}</span>
+      `;
+      list.appendChild(row);
     });
     box.appendChild(list);
   } else {
     const ok = document.createElement("p");
-    ok.className = "text-sm text-emerald-700 mt-2";
+    ok.className = "text-sm text-emerald-700 dark:text-emerald-400 mt-2";
     ok.textContent =
       "Nice! No cards above 30%, utilization profile looks healthy.";
     box.appendChild(ok);
@@ -872,33 +1139,139 @@ function exportData(format = "csv") {
 }
 window.exportData = exportData;
 
+// ====== CSV IMPORT ======
+function parseCsvLine(line) {
+  const values = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cur += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ",") {
+      values.push(cur);
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  values.push(cur);
+  return values;
+}
+
+function parseCsv(text) {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (!lines.length) return { rows: [], errors: ["File is empty."] };
+  const header = parseCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
+  const colIndex = {
+    name: header.indexOf("name"),
+    balance: header.indexOf("balance"),
+    apr: header.indexOf("apr"),
+    creditLimit: header.indexOf("creditlimit"),
+  };
+  const missing = Object.keys(colIndex).filter((k) => colIndex[k] === -1);
+  if (missing.length) {
+    return {
+      rows: [],
+      errors: [`Missing required column(s): ${missing.join(", ")}.`],
+    };
+  }
+
+  const rows = [];
+  const errors = [];
+  for (let i = 1; i < lines.length; i++) {
+    const values = parseCsvLine(lines[i]);
+    const name = (values[colIndex.name] || "").trim();
+    const balance = parseFloat(values[colIndex.balance]);
+    const apr = parseFloat(values[colIndex.apr]);
+    const creditLimit = parseFloat(values[colIndex.creditLimit]);
+    const fieldErrors = validateCardInput({ name, balance, apr, creditLimit });
+    if (Object.keys(fieldErrors).length) {
+      errors.push(`Row ${i + 1}: ${Object.values(fieldErrors).join(" ")}`);
+      continue;
+    }
+    rows.push({ name, balance, apr, creditLimit });
+  }
+  return { rows, errors };
+}
+
+importCsvBtn?.addEventListener("click", () => importCsvInput?.click());
+importCsvInput?.addEventListener("change", async () => {
+  const file = importCsvInput.files?.[0];
+  importCsvInput.value = "";
+  if (!file) return;
+  if (!userId) {
+    showModal("Authentication", "Please sign in to import accounts.");
+    return;
+  }
+
+  const text = await file.text();
+  const { rows, errors } = parseCsv(text);
+
+  if (!rows.length) {
+    showModal(
+      "Import failed",
+      errors.length
+        ? `No valid rows found.\n${errors.slice(0, 5).join("\n")}`
+        : "No valid rows found in the file."
+    );
+    return;
+  }
+
+  const cardsCollection = collection(
+    db,
+    `artifacts/${appId}/users/${userId}/cards`
+  );
+  let imported = 0;
+  for (const row of rows) {
+    try {
+      await setDoc(doc(cardsCollection), row);
+      imported++;
+    } catch (err) {
+      console.error("[Import] Row failed:", err);
+    }
+  }
+
+  const skipped = errors.length;
+  toast(
+    `Imported ${imported} account${imported === 1 ? "" : "s"}` +
+      (skipped ? ` • ${skipped} skipped` : "")
+  );
+  if (skipped) {
+    showModal(
+      "Import finished with issues",
+      `Imported ${imported} account(s). Skipped ${skipped} invalid row(s):\n${errors
+        .slice(0, 8)
+        .join("\n")}`
+    );
+  }
+});
+
 // ====== EVENTS ======
 
-// Add / Update (top form)
+// Add account (top form)
 form?.addEventListener("submit", async (e) => {
   e.preventDefault();
-  const id = cardIdInput.value;
   const name = document.getElementById("card-name").value.trim();
+  const balance = parseFloat(document.getElementById("balance").value);
+  const apr = parseFloat(document.getElementById("apr").value);
+  const creditLimit = parseFloat(document.getElementById("limit").value);
 
-  // Guardrails
-  const balance = Math.max(
-    0,
-    parseFloat(document.getElementById("balance").value)
-  );
-  const apr = Math.min(
-    99.99,
-    Math.max(0, parseFloat(document.getElementById("apr").value))
-  );
-  const creditLimit = Math.max(
-    0,
-    parseFloat(document.getElementById("limit").value)
-  );
-
-  if (!name || isNaN(balance) || isNaN(apr) || isNaN(creditLimit)) {
-    showModal(
-      "Validation",
-      "Please enter valid Name, Balance, APR, and Credit Limit."
-    );
+  const errors = validateCardInput({ name, balance, apr, creditLimit });
+  const firstInvalid = applyFieldErrors(errors, TOP_FORM_FIELD_MAP);
+  if (firstInvalid) {
+    firstInvalid.focus();
     return;
   }
   if (!userId) {
@@ -910,19 +1283,21 @@ form?.addEventListener("submit", async (e) => {
     db,
     `artifacts/${appId}/users/${userId}/cards`
   );
+  const prevText = submitBtn.textContent;
   try {
-    const data = { name, balance, apr, creditLimit };
-    if (id) await setDoc(doc(cardsCollection, id), data);
-    else await setDoc(doc(cardsCollection), data);
-    toast(id ? "Account updated" : "Account added");
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Adding…";
+    await setDoc(doc(cardsCollection), { name, balance, apr, creditLimit });
+    toast("Account added");
+    form.reset();
+    applyFieldErrors({}, TOP_FORM_FIELD_MAP);
   } catch (err) {
-    console.error("[Save] Add/Update failed:", err);
+    console.error("[Save] Add failed:", err);
     showModal("Error", "Could not save the account.");
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = prevText;
   }
-
-  form.reset();
-  cardIdInput.value = "";
-  submitBtn.textContent = "Add Account";
 });
 
 // Inline edit + delete (with Undo)
@@ -931,10 +1306,48 @@ cardList?.addEventListener("click", async (e) => {
   const cancelBtn = e.target.closest(".cancel-inline-btn");
   const saveBtn = e.target.closest(".save-inline-btn");
   const deleteBtn = e.target.closest(".delete-btn");
+  const nudgeBtn = e.target.closest(".nudge-btn");
+
+  if (nudgeBtn) {
+    if (!userId) {
+      showModal("Authentication", "Please sign in to update accounts.");
+      return;
+    }
+    const id = nudgeBtn.dataset.id;
+    const delta = +nudgeBtn.dataset.delta || 0;
+    const card = window.__latestCards.find((c) => c.id === id);
+    if (!card) return;
+    const newBalance = Math.max(0, (+card.balance || 0) + delta);
+
+    const cardsCollection = collection(
+      db,
+      `artifacts/${appId}/users/${userId}/cards`
+    );
+    nudgeBtn.disabled = true;
+    try {
+      await setDoc(
+        doc(cardsCollection, id),
+        { name: card.name, balance: newBalance, apr: card.apr, creditLimit: card.creditLimit }
+      );
+      card.balance = newBalance;
+      toast(delta < 0 ? "Balance decreased by $50" : "Balance increased by $50");
+      renderCards(window.__latestCards);
+    } catch (err) {
+      console.error("[Nudge] Update failed:", err);
+      showModal("Error", "Could not update the balance. Please try again.");
+      nudgeBtn.disabled = false;
+    }
+    return;
+  }
 
   if (editBtn) {
     editingId = editBtn.dataset.id;
     renderCards(window.__latestCards);
+    cardList
+      .querySelector(`.save-inline-btn[data-id="${editingId}"]`)
+      ?.closest(".debt-card")
+      ?.querySelector("input[data-field]")
+      ?.focus();
     return;
   }
   if (cancelBtn) {
@@ -943,37 +1356,49 @@ cardList?.addEventListener("click", async (e) => {
     return;
   }
   if (saveBtn) {
-    if (!userId) {
-      showModal("Authentication", "Please sign in to edit accounts.");
-      return;
-    }
     const id = saveBtn.dataset.id;
-    const cardEl = saveBtn.closest(".bg-white");
+    const cardEl = saveBtn.closest(".debt-card");
     if (!cardEl) return;
 
     const getVal = (sel) => {
       const inp = cardEl.querySelector(`input[data-field="${sel}"]`);
       return inp ? inp.value : null;
     };
-    const updated = {
-      balance: Math.max(0, parseFloat(getVal("balance"))),
-      apr: Math.min(99.99, Math.max(0, parseFloat(getVal("apr")))),
-      creditLimit: Math.max(0, parseFloat(getVal("creditLimit"))),
-      name: (getVal("name") || "").trim(),
+    const name = (getVal("name") || "").trim();
+    const balance = parseFloat(getVal("balance"));
+    const apr = parseFloat(getVal("apr"));
+    const creditLimit = parseFloat(getVal("creditLimit"));
+
+    const errors = validateCardInput({ name, balance, apr, creditLimit });
+    const inlineFieldMap = {
+      name: {
+        input: () => cardEl.querySelector('input[data-field="name"]'),
+        error: () => cardEl.querySelector('[data-error-for="name"]'),
+      },
+      balance: {
+        input: () => cardEl.querySelector('input[data-field="balance"]'),
+        error: () => cardEl.querySelector('[data-error-for="balance"]'),
+      },
+      apr: {
+        input: () => cardEl.querySelector('input[data-field="apr"]'),
+        error: () => cardEl.querySelector('[data-error-for="apr"]'),
+      },
+      creditLimit: {
+        input: () => cardEl.querySelector('input[data-field="creditLimit"]'),
+        error: () => cardEl.querySelector('[data-error-for="creditLimit"]'),
+      },
     };
-    if (
-      !updated.name ||
-      isNaN(updated.balance) ||
-      isNaN(updated.apr) ||
-      isNaN(updated.creditLimit)
-    ) {
-      showModal(
-        "Validation",
-        "Please provide valid values for Name, Balance, APR, and Limit."
-      );
+    const firstInvalid = applyFieldErrors(errors, inlineFieldMap);
+    if (firstInvalid) {
+      firstInvalid.focus();
+      return;
+    }
+    if (!userId) {
+      showModal("Authentication", "Please sign in to edit accounts.");
       return;
     }
 
+    const updated = { name, balance, apr, creditLimit };
     const cardsCollection = collection(
       db,
       `artifacts/${appId}/users/${userId}/cards`
@@ -1024,18 +1449,19 @@ cardList?.addEventListener("click", async (e) => {
 
     try {
       await deleteDoc(doc(cardsCollection, id));
+      announce("Account deleted. Undo available.");
       let undone = false;
 
       const undoEl = document.createElement("div");
       undoEl.className =
-        "fixed bottom-4 right-4 z-[1100] bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-lg flex items-center gap-3";
+        "fixed bottom-4 right-4 z-[1100] bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-lg ring-1 ring-white/10 flex items-center gap-3";
       undoEl.innerHTML = `<span>Account deleted</span>
-        <button class="px-2 py-1 bg-white text-gray-900 rounded hover:bg-gray-100 text-xs" id="undo-delete">Undo</button>`;
+        <button class="px-2 py-1 bg-white text-gray-900 rounded hover:bg-gray-100 text-xs font-medium" id="undo-delete">Undo</button>`;
       document.body.appendChild(undoEl);
 
       const timer = setTimeout(() => {
         if (undoEl.isConnected) undoEl.remove();
-      }, 5000);
+      }, 8000);
 
       undoEl
         .querySelector("#undo-delete")
@@ -1063,7 +1489,7 @@ cardList?.addEventListener("click", async (e) => {
 
 // Keyboard shortcuts (Enter=Save, Esc=Cancel)
 cardList?.addEventListener("keydown", (e) => {
-  const editingCard = e.target.closest(".bg-white");
+  const editingCard = e.target.closest(".debt-card");
   if (!editingCard) return;
   const saveBtn = editingCard.querySelector(".save-inline-btn");
   const cancelBtn = editingCard.querySelector(".cancel-inline-btn");
@@ -1083,16 +1509,29 @@ cardList?.addEventListener("keydown", (e) => {
 // Controls
 sortBySelect?.addEventListener("change", () => {
   sortBy = sortBySelect.value;
+  try {
+    localStorage.setItem("prefSortBy", sortBy);
+  } catch (e) {}
   renderCards(window.__latestCards);
 });
 sortDirBtn?.addEventListener("click", () => {
   sortDir = sortDirBtn.dataset.dir === "asc" ? "desc" : "asc";
   sortDirBtn.dataset.dir = sortDir;
   sortDirBtn.textContent = sortDir === "asc" ? "Asc" : "Desc";
+  try {
+    localStorage.setItem("prefSortDir", sortDir);
+  } catch (e) {}
   renderCards(window.__latestCards);
 });
 utilViewSelect?.addEventListener("change", () => {
   utilView = utilViewSelect.value;
+  try {
+    localStorage.setItem("prefUtilView", utilView);
+  } catch (e) {}
+  renderCards(window.__latestCards);
+});
+accountSearchInput?.addEventListener("input", () => {
+  searchQuery = accountSearchInput.value.trim();
   renderCards(window.__latestCards);
 });
 
@@ -1148,7 +1587,10 @@ signOutBtn?.addEventListener("click", async () => {
   try {
     await signOut(auth);
     setHeaderAuthUI(false);
-    noCardsMessage && (noCardsMessage.style.display = "block");
+    if (noCardsMessage) {
+      noCardsMessage.classList.remove("hidden");
+      noCardsMessage.textContent = "No accounts added yet. Click to add your first account.";
+    }
     cardList && (cardList.innerHTML = "");
     totalDebtDisplay && (totalDebtDisplay.textContent = `$0.00`);
     totalCreditLineDisplay && (totalCreditLineDisplay.textContent = `$0.00`);
@@ -1156,6 +1598,7 @@ signOutBtn?.addEventListener("click", async () => {
       (totalMonthlyInterestDisplay.textContent = `$0.00`);
     accountsMeta && (accountsMeta.textContent = "");
     form?.reset();
+    applyFieldErrors({}, TOP_FORM_FIELD_MAP);
     editingId = null;
   } catch (err) {
     console.error("[Auth] Sign-out failed:", err);
@@ -1207,14 +1650,15 @@ btRunBtn?.addEventListener("click", () => {
   out.innerHTML = "";
 
   if (result.error) {
-    out.innerHTML = `<p class="text-rose-600">${result.error}</p>`;
+    out.innerHTML = `<p class="text-rose-600 dark:text-rose-400">${escapeHtml(result.error)}</p>`;
     return;
   }
 
   const hdr = document.createElement("div");
-  hdr.className = "p-3 bg-white rounded-md border border-gray-200";
+  hdr.className =
+    "p-3 bg-white dark:bg-gray-900 rounded-md border border-gray-200 dark:border-gray-800";
   hdr.innerHTML = `
-    <p class="font-medium">Target: ${result.target}${
+    <p class="font-medium">Target: ${escapeHtml(result.target)}${
     result.capApplied !== null ? ` (cap ${result.capApplied}%)` : ""
   }</p>
     <p>Total Transfer: <span class="font-semibold">${fmtMoney(
@@ -1227,7 +1671,9 @@ btRunBtn?.addEventListener("click", () => {
     result.totalIntroSaved
   )} saved • ${fmtMoney(result.totalFees)} fees</span></p>
     <p class="${
-      result.netIntroSavings >= 0 ? "text-emerald-700" : "text-rose-700"
+      result.netIntroSavings >= 0
+        ? "text-emerald-700 dark:text-emerald-400"
+        : "text-rose-700 dark:text-rose-400"
     }">Net Savings Over Intro: <span class="font-semibold">${fmtMoney(
     result.netIntroSavings
   )}</span></p>
@@ -1239,11 +1685,12 @@ btRunBtn?.addEventListener("click", () => {
     list.className = "mt-3 space-y-2";
     result.moves.forEach((m, i) => {
       const row = document.createElement("div");
-      row.className = "text-sm p-2 bg-white rounded border border-gray-200";
+      row.className =
+        "text-sm p-2 bg-white dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-800";
       row.innerHTML = `
         <span class="font-medium">${i + 1}.</span> Move ${fmtMoney(
         m.amount
-      )} from <span class="font-semibold">${m.from}</span>
+      )} from <span class="font-semibold">${escapeHtml(m.from)}</span>
         (APR ${m.apr.toFixed(2)}%) • Est monthly saved ~${fmtMoney(
         m.estMonthlySaved
       )}
@@ -1256,7 +1703,79 @@ btRunBtn?.addEventListener("click", () => {
     out.appendChild(list);
   } else {
     out.innerHTML +=
-      '<p class="text-gray-600 mt-2">No eligible moves found.</p>';
+      '<p class="text-gray-600 dark:text-gray-400 mt-2">No eligible moves found.</p>';
+  }
+});
+
+// Payoff simulator: Run
+simRunBtn?.addEventListener("click", () => {
+  const out = document.getElementById("sim-output");
+  if (!out) return;
+
+  if (!window.__latestCards.length) {
+    showModal("No Data", "Please add accounts first.");
+    return;
+  }
+  const budget = +simBudgetInput?.value || 0;
+  if (budget <= 0) {
+    showModal("Missing Budget", "Enter a monthly payment budget greater than $0.");
+    return;
+  }
+  const strategy = simStrategySelect?.value || "avalanche";
+  const result = simulatePayoff(window.__latestCards, budget, strategy);
+  out.innerHTML = "";
+
+  if (result.error) {
+    out.innerHTML = `<p class="text-rose-600 dark:text-rose-400">${escapeHtml(result.error)}</p>`;
+    return;
+  }
+
+  const years = Math.floor(result.months / 12);
+  const remMonths = result.months % 12;
+  const durationText = [
+    years ? `${years} year${years === 1 ? "" : "s"}` : null,
+    remMonths ? `${remMonths} month${remMonths === 1 ? "" : "s"}` : null,
+  ]
+    .filter(Boolean)
+    .join(" ") || "0 months";
+
+  const payoffDate = new Date();
+  payoffDate.setMonth(payoffDate.getMonth() + result.months);
+  const payoffDateText = payoffDate.toLocaleDateString("en-US", {
+    month: "long",
+    year: "numeric",
+  });
+
+  const hdr = document.createElement("div");
+  hdr.className =
+    "p-3 bg-white dark:bg-gray-900 rounded-md border border-gray-200 dark:border-gray-800";
+  hdr.innerHTML = `
+    <p>Debt-free in: <span class="font-semibold">${durationText}</span> <span class="text-xs text-gray-500 dark:text-gray-400">(~${payoffDateText})</span></p>
+    <p>Total Interest Paid: <span class="font-semibold text-rose-700 dark:text-rose-400">${fmtMoney(
+      result.totalInterest
+    )}</span></p>
+  `;
+  out.appendChild(hdr);
+
+  if (result.payoffOrder.length) {
+    const list = document.createElement("div");
+    list.className = "mt-3 space-y-2";
+    const title = document.createElement("p");
+    title.className = "font-medium";
+    title.textContent = "Payoff order:";
+    list.appendChild(title);
+
+    result.payoffOrder.forEach((p, i) => {
+      const row = document.createElement("div");
+      row.className =
+        "flex items-center justify-between gap-3 p-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm";
+      row.innerHTML = `
+        <span class="min-w-0 break-words"><span class="font-medium">${i + 1}.</span> ${escapeHtml(p.name)}</span>
+        <span class="text-xs text-gray-500 dark:text-gray-400 shrink-0">Month ${p.month}</span>
+      `;
+      list.appendChild(row);
+    });
+    out.appendChild(list);
   }
 });
 
@@ -1271,16 +1790,55 @@ btResetBtn?.addEventListener("click", () => {
   const out = document.getElementById("bt-output");
   if (out)
     out.innerHTML =
-      '<p class="text-gray-500">Enter details and click “Recommend Transfer”.</p>';
+      '<p class="text-gray-500 dark:text-gray-400">Enter details and click “Recommend Transfer”.</p>';
   toast("Optimizer reset");
 });
 
-// PWA SW registration (optional; harmless if missing)
+// ====== SCROLLSPY (highlight nav link for section in view) ======
+const NAV_ACTIVE_CLASSES = [
+  "bg-sky-50",
+  "dark:bg-sky-950/50",
+  "border-sky-300",
+  "dark:border-sky-700",
+  "text-sky-700",
+  "dark:text-sky-300",
+  "font-semibold",
+];
+const navLinks = Array.from(document.querySelectorAll(".nav-link"));
+const navSections = navLinks
+  .map((link) => document.querySelector(link.getAttribute("href")))
+  .filter(Boolean);
+
+function setActiveNav(id) {
+  navLinks.forEach((link) => {
+    const isActive = link.getAttribute("href") === `#${id}`;
+    NAV_ACTIVE_CLASSES.forEach((c) => link.classList.toggle(c, isActive));
+  });
+}
+
+if (navSections.length && "IntersectionObserver" in window) {
+  const spy = new IntersectionObserver(
+    (entries) => {
+      const visible = entries
+        .filter((entry) => entry.isIntersecting)
+        .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+      if (visible) setActiveNav(visible.target.id);
+    },
+    { rootMargin: "-40% 0px -50% 0px", threshold: [0, 0.25, 0.5, 0.75, 1] }
+  );
+  navSections.forEach((sec) => spy.observe(sec));
+}
+
+// PWA SW registration (enables offline app-shell caching)
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
   });
 }
+
+// ====== FOOTER ======
+const footerYear = document.getElementById("footer-year");
+if (footerYear) footerYear.textContent = new Date().getFullYear();
 
 // ====== BOOT ======
 initFirebase();
