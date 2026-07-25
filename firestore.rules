@@ -1,0 +1,70 @@
+rules_version = '2';
+
+// Firestore security rules for Personal Debt Tracker.
+//
+// Data model:
+//   artifacts/{project}/users/{uid}/cards/{cardId}
+//     - Encrypted (Lock Mode):  { v, iv, data }
+//     - Legacy plaintext:       { name, balance, apr, creditLimit }
+//   artifacts/{project}/users/{uid}/meta/crypto
+//     - { v, salt, verifier: { iv, data } }
+//
+// Deploy:
+//   - Firebase Console → Firestore → Rules → paste this file → Publish, OR
+//   - firebase deploy --only firestore:rules   (requires firebase.json + CLI)
+//
+// Principle: a signed-in user can read/write ONLY documents under their own
+// uid. Everything else is denied by the absence of a matching allow rule.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // True only for the authenticated owner of this uid subtree.
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // A card doc must be one of the two known shapes; reject anything else so
+    // a compromised client can't write arbitrary/oversized junk.
+    function isValidCard(d) {
+      return
+        // Encrypted envelope (Lock Mode).
+        (d.keys().hasAll(['iv', 'data'])
+          && d['iv'] is string && d['iv'].size() <= 64
+          && d['data'] is string && d['data'].size() <= 8192)
+        ||
+        // Legacy plaintext (pre-Lock-Mode; migrated to encrypted on load).
+        (d.keys().hasAll(['name'])
+          && d['name'] is string && d['name'].size() <= 200);
+    }
+
+    // The per-user crypto meta doc (salt + passphrase verifier).
+    function isValidMeta(d) {
+      return d.keys().hasAll(['salt', 'verifier'])
+        && d['salt'] is string && d['salt'].size() <= 128;
+    }
+
+    match /artifacts/{project}/users/{userId} {
+
+      // The user container doc itself (if ever written directly).
+      allow read, write: if isOwner(userId);
+
+      match /cards/{cardId} {
+        allow read, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && isValidCard(request.resource.data);
+      }
+
+      match /meta/{docId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && isValidMeta(request.resource.data);
+        allow delete: if isOwner(userId);
+      }
+
+      // Any other subcollection under the user is denied by default.
+    }
+
+    // All paths outside the per-user subtree are denied by default.
+  }
+}
