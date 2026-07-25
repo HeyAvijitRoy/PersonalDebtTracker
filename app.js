@@ -26,6 +26,13 @@ const simRunBtn = document.getElementById("sim-run");
 
 // Auth / modal
 const authSection = document.getElementById("auth-section");
+const lockSection = document.getElementById("lock-section");
+const lockSetup = document.getElementById("lock-setup");
+const lockUnlock = document.getElementById("lock-unlock");
+const lockSetupForm = document.getElementById("lock-setup-form");
+const lockUnlockForm = document.getElementById("lock-unlock-form");
+const lockSetupError = document.getElementById("lock-setup-error");
+const lockUnlockError = document.getElementById("lock-unlock-error");
 const appLoading = document.getElementById("app-loading");
 const mainApp = document.getElementById("main-app");
 const googleSigninBtn = document.getElementById("google-signin-btn");
@@ -191,6 +198,7 @@ import {
   collection,
   onSnapshot,
   doc,
+  getDoc,
   setDoc,
   deleteDoc,
   enableIndexedDbPersistence,
@@ -217,6 +225,252 @@ if (!firebaseConfig || !firebaseConfig.apiKey) {
 console.log("[Auth] Config OK for project:", firebaseConfig.projectId);
 const appId = firebaseConfig.projectId;
 
+// ====== CLIENT-SIDE ENCRYPTION (Lock Mode) ======
+// Card fields are encrypted in the browser with an AES-GCM key derived from a
+// user passphrase (PBKDF2). Firestore only ever stores ciphertext, so even the
+// project owner cannot read a user's data without their passphrase. The key
+// lives in memory only and is cleared on sign-out / refresh (unlock per session).
+let cryptoKey = null; // in-memory CryptoKey; null until unlocked this session
+let currentCryptoMeta = null; // loaded meta doc for the signed-in user
+let migrationRunning = false;
+const PBKDF2_ITERATIONS = 210000;
+const VERIFY_TOKEN = "pdt-lock-mode-verify-v1";
+const textEnc = new TextEncoder();
+const textDec = new TextDecoder();
+
+const toB64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const fromB64 = (str) => Uint8Array.from(atob(str), (c) => c.charCodeAt(0));
+
+async function deriveKey(passphrase, saltBytes) {
+  const baseKey = await crypto.subtle.importKey(
+    "raw",
+    textEnc.encode(passphrase),
+    "PBKDF2",
+    false,
+    ["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt: saltBytes,
+      iterations: PBKDF2_ITERATIONS,
+      hash: "SHA-256",
+    },
+    baseKey,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+// Encrypt the plaintext card fields into a storable ciphertext envelope.
+async function encryptFields(fields) {
+  if (!cryptoKey) throw new Error("Locked: no encryption key in memory.");
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const payload = textEnc.encode(
+    JSON.stringify({
+      name: fields.name ?? "",
+      balance: +fields.balance || 0,
+      apr: +fields.apr || 0,
+      creditLimit: +fields.creditLimit || 0,
+    })
+  );
+  const ct = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    cryptoKey,
+    payload
+  );
+  return { v: 1, iv: toB64(iv), data: toB64(ct) };
+}
+
+// Decrypt a raw Firestore card document back to plaintext fields.
+// Legacy (pre-Lock-Mode) plaintext docs are returned as-is so the app keeps
+// working during migration.
+async function decryptFields(raw) {
+  const isEncrypted = raw && raw.data !== undefined && raw.iv !== undefined;
+  if (!isEncrypted) {
+    return {
+      name: raw?.name ?? "",
+      balance: +raw?.balance || 0,
+      apr: +raw?.apr || 0,
+      creditLimit: +raw?.creditLimit || 0,
+    };
+  }
+  const iv = fromB64(raw.iv);
+  const ct = fromB64(raw.data);
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv },
+    cryptoKey,
+    ct
+  );
+  return JSON.parse(textDec.decode(plaintext));
+}
+
+function metaDocRef(uid) {
+  return doc(db, `artifacts/${appId}/users/${uid}/meta/crypto`);
+}
+
+async function loadCryptoMeta(uid) {
+  const snap = await getDoc(metaDocRef(uid));
+  return snap.exists() ? snap.data() : null;
+}
+
+// First-time setup: generate a salt, derive the key, store salt + a verifier
+// blob (encrypted known token) so future unlocks can validate the passphrase.
+async function createCryptoMeta(uid, passphrase) {
+  const saltBytes = crypto.getRandomValues(new Uint8Array(16));
+  const key = await deriveKey(passphrase, saltBytes);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    textEnc.encode(VERIFY_TOKEN)
+  );
+  await setDoc(metaDocRef(uid), {
+    v: 1,
+    salt: toB64(saltBytes),
+    verifier: { iv: toB64(iv), data: toB64(ct) },
+  });
+  cryptoKey = key;
+}
+
+// Returning session: derive the key and confirm the passphrase by decrypting
+// the verifier. Returns true on success, false on wrong passphrase.
+async function unlockWithPassphrase(meta, passphrase) {
+  const saltBytes = fromB64(meta.salt);
+  const key = await deriveKey(passphrase, saltBytes);
+  try {
+    const iv = fromB64(meta.verifier.iv);
+    const ct = fromB64(meta.verifier.data);
+    const out = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
+    if (textDec.decode(out) !== VERIFY_TOKEN) return false;
+  } catch (e) {
+    return false; // AES-GCM auth-tag mismatch => wrong passphrase
+  }
+  cryptoKey = key;
+  return true;
+}
+
+// Re-encrypt any legacy plaintext docs in place (same doc id). Idempotent and
+// resumable: the read path handles both forms, so a partial run is safe.
+async function migrateLegacyDocs(uid, docs) {
+  if (migrationRunning || !cryptoKey) return;
+  const legacy = docs.filter((d) => {
+    const x = d.data();
+    return x && x.data === undefined && x.name !== undefined;
+  });
+  if (!legacy.length) return;
+  migrationRunning = true;
+  const cardsCollection = collection(db, `artifacts/${appId}/users/${uid}/cards`);
+  try {
+    for (const d of legacy) {
+      const x = d.data();
+      await setDoc(doc(cardsCollection, d.id), await encryptFields(x));
+    }
+    console.log(`[Crypto] Encrypted ${legacy.length} legacy card(s).`);
+  } catch (e) {
+    console.error("[Crypto] Migration failed:", e);
+  } finally {
+    migrationRunning = false;
+  }
+}
+
+// ====== LOCK MODE UI FLOW ======
+function showLockSetup() {
+  authSection?.classList.add("hidden");
+  appLoading?.classList.add("hidden");
+  mainApp?.classList.add("hidden");
+  lockSection?.classList.remove("hidden");
+  lockSetup?.classList.remove("hidden");
+  lockUnlock?.classList.add("hidden");
+  document.getElementById("lock-pass1")?.focus();
+}
+
+function showLockUnlock() {
+  authSection?.classList.add("hidden");
+  appLoading?.classList.add("hidden");
+  mainApp?.classList.add("hidden");
+  lockSection?.classList.remove("hidden");
+  lockUnlock?.classList.remove("hidden");
+  lockSetup?.classList.add("hidden");
+  document.getElementById("lock-pass")?.focus();
+}
+
+// Called once the key is in memory: hide the lock screen, show loading, and
+// start the (decrypting) Firestore listener.
+function enterAppAfterUnlock() {
+  lockSection?.classList.add("hidden");
+  lockSetup?.classList.add("hidden");
+  lockUnlock?.classList.add("hidden");
+  appLoading?.classList.remove("hidden");
+  firstSnapshotReceived = false;
+  setupFirestoreListener(userId);
+}
+
+lockSetupForm?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const p1 = document.getElementById("lock-pass1").value;
+  const p2 = document.getElementById("lock-pass2").value;
+  const showErr = (msg) => {
+    lockSetupError.textContent = msg;
+    lockSetupError.classList.remove("hidden");
+  };
+  if (p1.length < 8) return showErr("Use at least 8 characters.");
+  if (p1 !== p2) return showErr("Passphrases don't match.");
+  if (!userId) return showErr("Please sign in again.");
+  lockSetupError.classList.add("hidden");
+
+  const btn = document.getElementById("lock-setup-btn");
+  const prev = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Setting up…";
+  try {
+    await createCryptoMeta(userId, p1);
+    document.getElementById("lock-pass1").value = "";
+    document.getElementById("lock-pass2").value = "";
+    toast("Lock Mode enabled");
+    enterAppAfterUnlock();
+  } catch (err) {
+    console.error("[Crypto] Setup failed:", err);
+    showErr("Could not enable Lock Mode. Please try again.");
+    btn.disabled = false;
+    btn.textContent = prev;
+  }
+});
+
+lockUnlockForm?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const pass = document.getElementById("lock-pass").value;
+  const showErr = (msg) => {
+    lockUnlockError.textContent = msg;
+    lockUnlockError.classList.remove("hidden");
+  };
+  if (!pass) return showErr("Enter your passphrase.");
+  if (!currentCryptoMeta) return showErr("Please refresh and try again.");
+  lockUnlockError.classList.add("hidden");
+
+  const btn = document.getElementById("lock-unlock-btn");
+  const prev = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Unlocking…";
+  try {
+    const ok = await unlockWithPassphrase(currentCryptoMeta, pass);
+    if (!ok) {
+      showErr("Incorrect passphrase.");
+      btn.disabled = false;
+      btn.textContent = prev;
+      return;
+    }
+    document.getElementById("lock-pass").value = "";
+    enterAppAfterUnlock();
+  } catch (err) {
+    console.error("[Crypto] Unlock failed:", err);
+    showErr("Could not unlock. Please try again.");
+    btn.disabled = false;
+    btn.textContent = prev;
+  }
+});
+
 function initFirebase() {
   try {
     const app = initializeApp(firebaseConfig);
@@ -240,19 +494,40 @@ function initFirebase() {
         }
       });
 
-    onAuthStateChanged(auth, (user) => {
+    onAuthStateChanged(auth, async (user) => {
       if (user) {
         userId = user.uid;
         firstSnapshotReceived = false;
+        cryptoKey = null; // require unlock each session
+        currentCryptoMeta = null;
         authSection?.classList.add("hidden");
         mainApp?.classList.add("hidden");
         appLoading?.classList.remove("hidden");
+        lockSection?.classList.add("hidden");
         authStatus && (authStatus.textContent = "");
         setHeaderAuthUI(true, user.displayName);
-        setupFirestoreListener(user.uid);
+        // Lock Mode gate: load crypto settings, then set up or unlock.
+        try {
+          currentCryptoMeta = await loadCryptoMeta(user.uid);
+          if (!currentCryptoMeta) {
+            showLockSetup();
+          } else {
+            showLockUnlock();
+          }
+        } catch (err) {
+          console.error("[Crypto] Failed to load crypto meta:", err);
+          appLoading?.classList.add("hidden");
+          showModal(
+            "Error",
+            "Could not load your encryption settings. Please refresh and try again."
+          );
+        }
       } else {
         userId = null;
+        cryptoKey = null;
+        currentCryptoMeta = null;
         authSection?.classList.remove("hidden");
+        lockSection?.classList.add("hidden");
         mainApp?.classList.add("hidden");
         appLoading?.classList.add("hidden");
         setHeaderAuthUI(false);
@@ -274,12 +549,19 @@ function setupFirestoreListener(uid) {
   );
   unsubscribe = onSnapshot(
     cardsCollection,
-    (snapshot) => {
-      const fetchedCards = snapshot.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-      }));
-      window.__latestCards = fetchedCards.map((x) => ({ ...x }));
+    async (snapshot) => {
+      const decrypted = [];
+      for (const d of snapshot.docs) {
+        try {
+          const fields = await decryptFields(d.data());
+          decrypted.push({ id: d.id, ...fields });
+        } catch (err) {
+          // A doc we can't decrypt (e.g. wrong key) is skipped rather than
+          // crashing the whole render.
+          console.error("[Crypto] Could not decrypt card", d.id, err);
+        }
+      }
+      window.__latestCards = decrypted;
       if (editingId && !window.__latestCards.find((c) => c.id === editingId))
         editingId = null;
 
@@ -290,6 +572,9 @@ function setupFirestoreListener(uid) {
       }
 
       renderAll(window.__latestCards);
+
+      // Encrypt any legacy plaintext docs in place (idempotent).
+      migrateLegacyDocs(uid, snapshot.docs);
     },
     (error) => {
       console.error("[Firestore] onSnapshot error:", error);
@@ -1215,6 +1500,10 @@ importCsvInput?.addEventListener("change", async () => {
     showModal("Authentication", "Please sign in to import accounts.");
     return;
   }
+  if (!cryptoKey) {
+    showModal("Locked", "Please unlock with your passphrase before importing.");
+    return;
+  }
 
   const text = await file.text();
   const { rows, errors } = parseCsv(text);
@@ -1236,7 +1525,7 @@ importCsvInput?.addEventListener("change", async () => {
   let imported = 0;
   for (const row of rows) {
     try {
-      await setDoc(doc(cardsCollection), row);
+      await setDoc(doc(cardsCollection), await encryptFields(row));
       imported++;
     } catch (err) {
       console.error("[Import] Row failed:", err);
@@ -1287,7 +1576,10 @@ form?.addEventListener("submit", async (e) => {
   try {
     submitBtn.disabled = true;
     submitBtn.textContent = "Adding…";
-    await setDoc(doc(cardsCollection), { name, balance, apr, creditLimit });
+    await setDoc(
+      doc(cardsCollection),
+      await encryptFields({ name, balance, apr, creditLimit })
+    );
     toast("Account added");
     form.reset();
     applyFieldErrors({}, TOP_FORM_FIELD_MAP);
@@ -1327,7 +1619,12 @@ cardList?.addEventListener("click", async (e) => {
     try {
       await setDoc(
         doc(cardsCollection, id),
-        { name: card.name, balance: newBalance, apr: card.apr, creditLimit: card.creditLimit }
+        await encryptFields({
+          name: card.name,
+          balance: newBalance,
+          apr: card.apr,
+          creditLimit: card.creditLimit,
+        })
       );
       card.balance = newBalance;
       toast(delta < 0 ? "Balance decreased by $50" : "Balance increased by $50");
@@ -1408,7 +1705,7 @@ cardList?.addEventListener("click", async (e) => {
     try {
       saveBtn.disabled = true;
       saveBtn.innerHTML = "Saving…";
-      await setDoc(doc(cardsCollection, id), updated);
+      await setDoc(doc(cardsCollection, id), await encryptFields(updated));
 
       editingId = null;
       toast("Account updated");
@@ -1471,12 +1768,15 @@ cardList?.addEventListener("click", async (e) => {
           clearTimeout(timer);
           if (undoEl.isConnected) undoEl.remove();
 
-          await setDoc(doc(cardsCollection, id), {
-            name: snapshot.name,
-            balance: snapshot.balance,
-            apr: snapshot.apr,
-            creditLimit: snapshot.creditLimit,
-          });
+          await setDoc(
+            doc(cardsCollection, id),
+            await encryptFields({
+              name: snapshot.name,
+              balance: snapshot.balance,
+              apr: snapshot.apr,
+              creditLimit: snapshot.creditLimit,
+            })
+          );
           toast("Delete undone");
         });
     } catch (err) {
