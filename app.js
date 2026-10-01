@@ -1160,16 +1160,23 @@ function donut(util) {
 
 function renderStrategy(cards, strategy) {
   const target = strategy === "avalanche" ? avalancheList : snowballList;
+  // Paid-off accounts drop out of the payoff order.
+  const owing = cards.filter((c) => (+c.balance || 0) > 0);
   const sorted =
     strategy === "avalanche"
-      ? [...cards].sort((a, b) => (+b.apr || 0) - (+a.apr || 0))
-      : [...cards].sort((a, b) => (+a.balance || 0) - (+b.balance || 0));
+      ? owing.sort((a, b) => (+b.apr || 0) - (+a.apr || 0))
+      : owing.sort((a, b) => (+a.balance || 0) - (+b.balance || 0));
 
   if (!target) return;
   target.innerHTML = "";
   if (!cards.length) {
     target.innerHTML =
       '<button type="button" onclick="focusAddForm()" class="text-gray-500 dark:text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 hover:underline transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded">Add accounts to see the payoff plan.</button>';
+    return;
+  }
+  if (!sorted.length) {
+    target.innerHTML =
+      '<p class="text-emerald-700 dark:text-emerald-400">All accounts are paid off. 🎉</p>';
     return;
   }
   sorted.forEach((card, idx) => {
@@ -1197,6 +1204,11 @@ function renderExpensive(cards) {
   if (!expensiveList) return;
   const ranked = rankByInterestPer100(cards);
   expensiveList.innerHTML = "";
+  if (!ranked.length && cards.length) {
+    expensiveList.innerHTML =
+      '<p class="text-emerald-700 dark:text-emerald-400">No balances left to rank.</p>';
+    return;
+  }
   if (!ranked.length) {
     expensiveList.innerHTML =
       '<button type="button" onclick="focusAddForm()" class="text-gray-500 dark:text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 hover:underline transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded">Add accounts to see per-$100 cost ranking.</button>';

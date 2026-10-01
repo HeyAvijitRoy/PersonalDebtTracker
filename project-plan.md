@@ -95,7 +95,7 @@ Firebase — all flows passed; ready to merge to `main`).
 
 **At merge / deploy**
 
-- [ ] Deploy `firestore.rules` to the Firebase project (Console → Rules →
+- [x] Deploy `firestore.rules` to the Firebase project (Console → Rules →
       Publish) so the server-side lockdown is live alongside the merge.
 
 ---
