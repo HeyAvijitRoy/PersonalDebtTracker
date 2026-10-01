@@ -570,6 +570,8 @@ const USD = new Intl.NumberFormat("en-US", {
   currency: "USD",
 });
 const fmtMoney = (n) => USD.format(+n || 0);
+// Balances that would display as $0.00 (incl. float residue) count as paid off.
+const hasBalance = (c) => (+c.balance || 0) >= 0.005;
 const ESCAPE_MAP = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const escapeHtml = (str) => String(str ?? "").replace(/[&<>"']/g, (m) => ESCAPE_MAP[m]);
 const monthlyInterest = (balance, aprPct) =>
@@ -607,7 +609,7 @@ function riskBadge(util) {
 }
 function rankByInterestPer100(cards) {
   return cards
-    .filter((c) => (+c.balance || 0) > 0)
+    .filter(hasBalance)
     .map((c) => ({
       name: c.name,
       id: c.id,
@@ -1161,7 +1163,7 @@ function donut(util) {
 function renderStrategy(cards, strategy) {
   const target = strategy === "avalanche" ? avalancheList : snowballList;
   // Paid-off accounts drop out of the payoff order.
-  const owing = cards.filter((c) => (+c.balance || 0) > 0);
+  const owing = cards.filter(hasBalance);
   const sorted =
     strategy === "avalanche"
       ? owing.sort((a, b) => (+b.apr || 0) - (+a.apr || 0))
@@ -1635,7 +1637,10 @@ cardList?.addEventListener("click", async (e) => {
     const delta = +nudgeBtn.dataset.delta || 0;
     const card = window.__latestCards.find((c) => c.id === id);
     if (!card) return;
-    const newBalance = Math.max(0, (+card.balance || 0) + delta);
+    const newBalance = Math.max(
+      0,
+      Math.round(((+card.balance || 0) + delta) * 100) / 100
+    );
 
     const cardsCollection = collection(
       db,
