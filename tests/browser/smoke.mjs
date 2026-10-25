@@ -1,0 +1,39 @@
+import { chromium } from "playwright";
+import assert from "node:assert/strict";
+import { mkdir } from "node:fs/promises";
+import { app,auth,firestore } from "./firebase-stub.mjs";
+const browser=await chromium.launch({headless:true});
+try {
+ const context=await browser.newContext({serviceWorkers:"block",viewport:{width:1280,height:900}});
+ const page=await context.newPage();const errors=[];
+ page.on("pageerror",error=>errors.push(error.message));
+ await page.route("**/*",async route=>{
+  const url=new URL(route.request().url());
+  if(url.hostname==="www.gstatic.com"){
+   const body=url.pathname.endsWith("firebase-app.js")?app:url.pathname.endsWith("firebase-auth.js")?auth:firestore;
+   return route.fulfill({contentType:"text/javascript",body});
+  }
+  if(url.hostname!=="127.0.0.1")return route.abort();
+  if(url.pathname.endsWith("/env.js"))return route.fulfill({contentType:"text/javascript",body:"window.__FIREBASE_CONFIG={apiKey:'synthetic',projectId:'synthetic-project'};"});
+  return route.continue();
+ });
+ await page.goto(process.env.PDT_TEST_URL??"http://127.0.0.1:5173/");
+ await page.locator("#lock-pass1").fill("synthetic-passphrase");await page.locator("#lock-pass2").fill("synthetic-passphrase");await page.locator("#lock-setup-btn").click();
+ await page.locator("#main-app:not(.hidden)").waitFor();
+ await page.locator("#card-name").fill("Synthetic Card");await page.locator("#limit").fill("5000");await page.locator("#available-credit").fill("3200");await page.locator("#apr").fill("24");
+ assert.equal(await page.locator("#balance").inputValue(),"1800.00");await page.locator("#submit-btn").click();
+ await page.waitForFunction(()=>document.querySelector("#card-list")?.textContent.includes("$1,800.00"));
+ await page.waitForFunction(()=>document.querySelector("#sync-status")?.textContent.includes("No local drafts"));
+ await page.locator(".inline-edit-btn").first().click();await page.locator('[data-field="availableCredit"]').fill("3500");await page.locator(".save-inline-btn").click();
+ await page.waitForFunction(()=>document.querySelector("#card-list")?.textContent.includes("$1,500.00"));
+ await page.waitForFunction(()=>document.querySelector("#sync-status")?.textContent.includes("No local drafts"));
+ const count=await page.evaluate(()=>[...__syntheticDocs.keys()].filter(k=>k.includes('/events/')).length);assert.equal(count,2);
+ assert.equal(await page.evaluate(()=>[...__syntheticDocs.values()].some(v=>Object.hasOwn(v,'balance'))),false);
+ await mkdir("test-results",{recursive:true});await page.screenshot({path:"test-results/accounts-desktop.png",fullPage:true});
+ await page.setViewportSize({width:390,height:844});await page.screenshot({path:"test-results/accounts-mobile.png",fullPage:true});
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,"Mobile horizontal overflow");
+ await page.locator("#sign-out-btn").click();await page.locator("#main-app").waitFor({state:"hidden"});
+ assert.equal(await page.locator("#card-list").textContent(),"");assert.deepEqual(errors,[]);
+ console.log("Browser smoke passed: calculated entry, edit, encrypted history, mobile layout, sign-out.");
+ await context.close();
+} finally {await browser.close();}

@@ -1,3 +1,19 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer components {
+  .tracker-input { @apply block w-full mt-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100; }
+  .tracker-input:focus { @apply outline-none ring-2 ring-sky-500; }
+  .tracker-input[readonly] { @apply bg-gray-100 dark:bg-gray-800; }
+  .tracker-fields { @apply grid grid-cols-1 md:grid-cols-3 gap-4 text-sm; }
+  .tracker-button { @apply inline-block px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800; }
+  .tracker-button:focus-visible { @apply outline-none ring-2 ring-sky-500; }
+  .tracker-button:disabled { @apply opacity-50 cursor-not-allowed; }
+  .tracker-help { @apply text-xs text-gray-500 dark:text-gray-400 mt-2; }
+  .tracker-status { @apply rounded-lg border border-sky-200 dark:border-sky-900 bg-sky-50 dark:bg-sky-950/40 p-3 mb-4 text-sm; }
+  .tracker-sync-row { @apply flex flex-wrap items-center gap-2 mt-2; }
+  .tracker-details { @apply text-sm my-3; }
+  .tracker-details summary { @apply cursor-pointer py-2 font-medium; }
+  .tracker-undo { @apply fixed bottom-4 right-4 z-[1100] bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-lg; }
+}

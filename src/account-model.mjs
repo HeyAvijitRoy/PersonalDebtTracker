@@ -43,7 +43,7 @@ export function readAccount(raw) {
     }
     return { name, balance: raw.balance, apr: raw.apr, creditLimit: raw.creditLimit };
   }
-  const supported = new Set(["schemaVersion", "name", "balance", "apr", "creditLimit", "entryMethod", "availableCredit", "balanceObservedAt", "updatedAt", "effectiveDate", "status", "archived", "note", "reason"]);
+  const supported = new Set(["schemaVersion", "name", "balance", "apr", "creditLimit", "entryMethod", "availableCredit", "balanceObservedAt", "updatedAt", "effectiveDate", "status", "archived", "note", "reason", "deletedAt"]);
   if (Object.keys(raw).some(key => !supported.has(key))) throw new TypeError("Unrecognized account fields. Update the app before editing.");
   const creditLimit = monetary(raw.creditLimit);
   const apr = aprToBasisPoints(raw.apr) / 100;
@@ -64,6 +64,7 @@ export function readAccount(raw) {
     effectiveDate: raw.effectiveDate == null ? null : dateOnly(raw.effectiveDate),
     status: choice(raw.status ?? "unknown", ["open", "closed", "unknown"], "issuer status"),
     archived,
+    deletedAt:timestamp(raw.deletedAt),
     note: text(raw.note ?? "", 1000, "note"),
     reason: text(raw.reason ?? "", 120, "reason"),
   };

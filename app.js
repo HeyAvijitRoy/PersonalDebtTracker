@@ -1,7 +1,13 @@
-import { encryptAccount, decryptAccount } from "./src/account-crypto.mjs";
+import { decryptAccount } from "./src/account-crypto.mjs";
 import { moneyToCents, aprToBasisPoints } from "./src/money.mjs";
 import { SessionScope } from "./src/session-scope.mjs";
+import { TrackingStore,revisionOf,fieldsOf,cardPath } from "./src/tracking-store.mjs";
+import { indexedOutbox } from "./src/outbox.mjs";
+import { firestoreAdapter } from "./src/firestore-adapter.mjs";
+import { makeObservation,localDate } from "./src/observations.mjs";
+import { estimateBalance,paymentToTarget } from "./src/money.mjs";
 const sessionScope = new SessionScope();
+let tracking=null,cloudCards=[],pendingRows=[],viewSequence=0;
 
 // ====== UI ELEMENTS ======
 const form = document.getElementById("debt-form");
@@ -82,6 +88,7 @@ let sortBy = sortBySelect?.value || "name";
 let sortDir = sortDirBtn?.dataset.dir || "desc";
 let utilView = utilViewSelect?.value || "bar";
 let editingId = null;
+let editingBase = null;
 let firstSnapshotReceived = false;
 let searchQuery = "";
 window.__latestCards = [];
@@ -205,7 +212,6 @@ import {
   doc,
   getDoc,
   setDoc,
-  deleteDoc,
   enableIndexedDbPersistence,
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
@@ -265,11 +271,6 @@ async function deriveKey(passphrase, saltBytes) {
     false,
     ["encrypt", "decrypt"]
   );
-}
-
-// Encrypt the plaintext card fields into a storable ciphertext envelope.
-async function encryptFields(fields) {
-  return encryptAccount(fields, cryptoKey);
 }
 
 function metaDocRef(uid) {
@@ -347,13 +348,68 @@ function showLockUnlock() {
 // Called once the key is in memory: hide the lock screen, show loading, and
 // start the (decrypting) Firestore listener.
 function enterAppAfterUnlock() {
+  const generation=sessionScope.generation,uid=userId,key=cryptoKey;
+  tracking?.close();
+  tracking=new TrackingStore({namespace:`artifacts/${appId}/users/${uid}`,key,
+    adapter:firestoreAdapter(db),outbox:indexedOutbox(),
+    isActive:()=>sessionScope.current(generation)&&userId===uid&&cryptoKey===key,
+    onChange:()=>{refreshTrackingView().catch(()=>{});},
+  });
   lockSection?.classList.add("hidden");
   lockSetup?.classList.add("hidden");
   lockUnlock?.classList.add("hidden");
   appLoading?.classList.remove("hidden");
   firstSnapshotReceived = false;
   setupFirestoreListener(userId);
+  tracking.flush().catch(()=>{});
 }
+
+async function refreshTrackingView() {
+  const store=tracking,sequence=++viewSequence;
+  if(!store)return;
+  const rows=await store.pending();
+  if(store!==tracking||sequence!==viewSequence)return;
+  pendingRows=rows;
+  const blocked=new Set(rows.filter(row=>row.status==="conflict").map(row=>row.operation.accountId));
+  const view=new Map(cloudCards.map(card=>[card.id,card]));
+  for(const row of rows) {
+    const op=row.operation;if(blocked.has(op.accountId))continue;
+    view.set(op.accountId,{...op.after,id:op.accountId,_revision:op.id,_pending:true});
+  }
+  window.__latestCards=[...view.values()].filter(card=>!card.deletedAt);
+  renderAll(window.__latestCards);
+  renderSyncStatus();
+}
+
+function renderSyncStatus() {
+  const box=document.getElementById("sync-status");if(!box)return;
+  box.replaceChildren();
+  if(!pendingRows.length){box.textContent="No local drafts pending. Balances reflect the last received observations.";return;}
+  const title=document.createElement("p");title.textContent=`${pendingRows.length} encrypted change(s) saved on this device, waiting to sync.`;box.append(title);
+  for(const row of pendingRows){
+    const op=row.operation,line=document.createElement("div");line.className="tracker-sync-row";
+    const text=document.createElement("span");
+    const current=cloudCards.find(c=>c.id===op.accountId);
+    text.textContent=row.error==="rules"?`${op.after.name}: server permissions/rules need attention; draft retained.`:row.status==="conflict"?`${op.after.name}: draft balance ${fmtMoney(op.after.balance)}; latest balance ${current?fmtMoney(current.balance):"account removed"}.`:op.after.name+": pending connection.";
+    line.append(text);
+    if(row.status==="conflict"){
+      const apply=document.createElement("button");apply.className="tracker-button";apply.textContent="Apply my draft to latest";
+      apply.onclick=async()=>{const store=tracking;if(!current||!store)return;try{await store.discard(op.accountId);await store.enqueue(current,op.after,"conflict-resolution",op.details);store.flush().catch(()=>{});}catch{showModal("Not saved","Could not apply the draft. Please try again.");}};line.append(apply);
+    }
+    const discard=document.createElement("button");discard.className="tracker-button";discard.textContent="Discard this account's drafts";
+    discard.onclick=()=>tracking?.discard(op.accountId).catch(()=>showModal("Error","Could not discard the draft."));line.append(discard);box.append(line);
+  }
+  const retry=document.createElement("button");retry.className="tracker-button";retry.textContent="Retry sync";retry.onclick=()=>tracking?.flush().catch(()=>{});box.append(retry);
+}
+
+async function saveTracked(view,account,type="edit",details={}) {
+  if(!tracking||!userId||!cryptoKey)throw new Error("Sign in and unlock before saving.");
+  const store=tracking;
+  const result=await store.enqueue(view,account,type,details);
+  if(store!==tracking)throw new Error("Session changed.");
+  await refreshTrackingView();store.flush().catch(()=>{});return result;
+}
+window.addEventListener("online",()=>tracking?.flush().catch(()=>{}));
 
 lockSetupForm?.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -420,6 +476,8 @@ lockUnlockForm?.addEventListener("submit", async (e) => {
 });
 
 function clearUnlockedState() {
+  tracking?.close();tracking=null;cloudCards=[];pendingRows=[];viewSequence++;
+  document.querySelectorAll(".tracker-undo").forEach(element=>element.remove());
   sessionScope.invalidate();
   if (unsubscribe) { unsubscribe(); unsubscribe = null; }
   cryptoKey = null;
@@ -442,6 +500,7 @@ function clearUnlockedState() {
     if (input) input.value = "";
   }
   form?.reset();
+  if(document.getElementById("observation-date"))document.getElementById("observation-date").value=localDate();
   closeModal();
   if (modalMessage) modalMessage.textContent = "";
   if (modalTitle) modalTitle.textContent = "";
@@ -540,9 +599,9 @@ function setupFirestoreListener(uid) {
       const decrypted = [];
       for (const d of snapshot.docs) {
         try {
-          const fields = await decryptAccount(d.data(), listenerKey);
+          const fields = await decryptAccount(d.data(), listenerKey,`artifacts/${appId}/users/${uid}/cards/${d.id}`);
           if (!sessionScope.accepts(ticket) || userId !== uid || cryptoKey !== listenerKey) return;
-          decrypted.push({ id: d.id, ...fields });
+          decrypted.push({ ...fields,id:d.id,_revision:revisionOf(d.data()),_purging:d.data().purging??false });
         } catch (err) {
           // A doc we can't decrypt (e.g. wrong key) is skipped rather than
           // crashing the whole render.
@@ -551,6 +610,7 @@ function setupFirestoreListener(uid) {
       }
       if (!sessionScope.accepts(ticket) || userId !== uid || cryptoKey !== listenerKey) return;
       window.__latestCards = decrypted;
+      cloudCards=decrypted;
       if (editingId && !window.__latestCards.find((c) => c.id === editingId))
         editingId = null;
 
@@ -560,7 +620,7 @@ function setupFirestoreListener(uid) {
         mainApp?.classList.remove("hidden");
       }
 
-      renderAll(window.__latestCards);
+      if(tracking)await refreshTrackingView();else renderAll(window.__latestCards);
     },
     (error) => {
       console.error("[Firestore] onSnapshot error:", error);
@@ -613,12 +673,12 @@ function computeCardUtilization(card) {
 }
 function riskBadge(util) {
   if (util > 80)
-    return '<span class="inline-block text-[10px] px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300">&gt;80% High</span>';
+    return '<span class="inline-block text-[10px] px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300">&gt;80% utilization</span>';
   if (util > 50)
-    return '<span class="inline-block text-[10px] px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300">&gt;50% Medium</span>';
+    return '<span class="inline-block text-[10px] px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300">&gt;50% utilization</span>';
   if (util > 30)
-    return '<span class="inline-block text-[10px] px-2 py-0.5 rounded-full bg-yellow-100 dark:bg-yellow-950/50 text-yellow-700 dark:text-yellow-300">&gt;30% Watch</span>';
-  return '<span class="inline-block text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300">Healthy</span>';
+    return '<span class="inline-block text-[10px] px-2 py-0.5 rounded-full bg-yellow-100 dark:bg-yellow-950/50 text-yellow-700 dark:text-yellow-300">&gt;30% utilization</span>';
+  return '<span class="inline-block text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300">At or below 30%</span>';
 }
 function rankByInterestPer100(cards) {
   return cards
@@ -665,8 +725,8 @@ function computeFicoHints(cards) {
     const next = thresholds.find((t) => util > t);
     if (next !== undefined) {
       const targetBal = (next / 100) * lim;
-      const dollarsToDrop = Math.max(0, bal - targetBal);
-      if (dollarsToDrop > 0.01)
+      const dollarsToDrop = paymentToTarget(bal, lim, next) / 100;
+      if (dollarsToDrop > 0)
         nudges.push({
           name: c.name,
           currentUtil: util,
@@ -700,13 +760,13 @@ function renderCardFicoHint(card) {
     ? `<span class="font-semibold text-sky-700 dark:text-sky-400">Pay ${fmtMoney(nudge.dollarsToDrop)}</span> to reach ${nudge.nextThreshold}% utilization.`
     : +card.creditLimit > 0
     ? computeCardUtilization(card) <= 30
-      ? "No threshold payment needed: utilization is already at or below 30%."
-      : "Within $0.01 of the next utilization threshold."
+      ? "No payment needed for the selected utilization targets."
+      : "At the next utilization target to within $0.01."
     : "Add a credit limit to see the threshold payment amount.";
 
   return `
     <div class="mt-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-      <p class="text-xs font-medium text-gray-700 dark:text-gray-300">Cheapest “threshold nudges” (FICO optics)</p>
+      <p class="text-xs font-medium text-gray-700 dark:text-gray-300">Payments to utilization targets</p>
       <p class="mt-1 text-sm text-gray-700 dark:text-gray-300">${message}</p>
     </div>
   `;
@@ -978,6 +1038,8 @@ function renderAll(cards) {
 }
 
 function renderCards(cards) {
+  const currentEditor=cardList?.querySelector('.save-inline-btn')?.closest('.debt-card');
+  const draft=currentEditor?Array.from(currentEditor.querySelectorAll('[data-field]')).map(input=>({field:input.dataset.field,value:input.value,checked:input.checked})):null;
   const { debt, limit, monthly, util } = computeTotals(cards);
   if (totalDebtDisplay) totalDebtDisplay.textContent = fmtMoney(debt);
   if (totalCreditLineDisplay)
@@ -1066,11 +1128,13 @@ function renderCards(cards) {
               <p>Limit: <span class="font-semibold text-gray-900 dark:text-gray-100">${fmtMoney(
                 creditLimit
               )}</span></p>
-              <p>Monthly Interest: <span class="font-semibold text-gray-900 dark:text-gray-100">${fmtMoney(
+              <p>Monthly cost scenario: <span class="font-semibold text-gray-900 dark:text-gray-100">${fmtMoney(
                 monthlyInt
               )}</span></p>
             </div>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Est. monthly interest per $100: ${fmtMoney(interestPer100(apr))}</p>
+            <p class="tracker-help">${card.entryMethod==='availableCredit'?'Estimated from available credit: '+fmtMoney(card.availableCredit):'Direct balance entry'} ? ${card.effectiveDate?'Observed '+escapeHtml(card.effectiveDate):'Observation date not recorded'}${card._pending?' ? Pending sync':''}</p>
+            <button class="refresh-observation tracker-button" data-id="${card.id}">Record current values as observed today</button>
             <div class="mt-2 flex items-center gap-2">
               <span class="text-xs text-gray-500 dark:text-gray-400">Quick pay:</span>
               <button
@@ -1133,6 +1197,7 @@ function renderCards(cards) {
             </h3>
             <div class="mt-1"><span class="inline-block text-[10px] px-2 py-0.5 rounded-full bg-sky-100 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300">Editing</span></div>
             <div class="mt-3 space-y-3 text-sm">
+              ${renderEntryExtras(card)}
               <label class="block">
                 <span class="text-gray-600 dark:text-gray-400">Balance ($)</span>
                 <input data-field="balance" type="number" inputmode="decimal" step="0.01" min="0" value="${balance}"
@@ -1174,7 +1239,22 @@ function renderCards(cards) {
       `;
     }
     cardList.appendChild(el);
+    if(isEditing){
+      if(draft)for(const field of draft){const input=el.querySelector(`[data-field="${field.field}"]`);if(input){input.value=field.value;if(input.type==='checkbox')input.checked=field.checked;}}
+      refreshEntry(el);
+    }
   });
+}
+
+function renderEntryExtras(card){
+  const method=card.entryMethod??'direct';
+  return `<label class="block">Balance entry<select class="tracker-input" data-field="entryMethod"><option value="availableCredit" ${method==='availableCredit'?'selected':''}>Calculate from available credit</option><option value="direct" ${method==='direct'?'selected':''}>Enter balance directly</option></select></label>
+    <label class="block">Available credit ($)<input class="tracker-input" data-field="availableCredit" type="number" step="0.01" min="0" value="${card.availableCredit??''}" /></label>
+    <p class="balance-preview tracker-help"></p>
+    <label class="block">Observed on<input class="tracker-input" data-field="effectiveDate" type="date" value="${localDate()}" /></label>
+    <label class="block"><input data-field="confirmObservation" type="checkbox" /> I checked these balance inputs today (or on the selected date)</label>
+    <label class="block">Reason (optional)<input class="tracker-input" data-field="reason" maxlength="120" value="" /></label>
+    <label class="block">Note (optional)<textarea class="tracker-input" data-field="note" maxlength="1000">${escapeHtml(card.note??'')}</textarea></label>`;
 }
 
 function donut(util) {
@@ -1314,7 +1394,7 @@ function renderFicoHints(cards) {
         <p class="text-xl font-bold">${count}</p>
         ${
           count
-            ? `<p class="text-xs mt-1 opacity-90">Min to tame: ${fmtMoney(minToTame)}</p>`
+            ? `<p class="text-xs mt-1 opacity-90">Amount to reach target: ${fmtMoney(minToTame)}</p>`
             : `<p class="text-xs mt-1 opacity-90">All clear</p>`
         }
       </div>
@@ -1350,7 +1430,7 @@ function renderFicoHints(cards) {
     list.className = "mt-3 space-y-2";
     const title = document.createElement("p");
     title.className = "font-medium";
-    title.textContent = "Cheapest “threshold nudges” (FICO optics):";
+    title.textContent = "Payments to utilization targets:";
     list.appendChild(title);
 
     nudges.slice(0, 8).forEach((n) => {
@@ -1371,7 +1451,7 @@ function renderFicoHints(cards) {
     const ok = document.createElement("p");
     ok.className = "text-sm text-emerald-700 dark:text-emerald-400 mt-2";
     ok.textContent =
-      "Nice! No cards above 30%, utilization profile looks healthy.";
+      "No tracked cards are above the 30% planning target.";
     box.appendChild(ok);
   }
 }
@@ -1597,7 +1677,7 @@ importCsvInput?.addEventListener("change", async () => {
   let imported = 0;
   for (const row of rows) {
     try {
-      await setDoc(doc(cardsCollection), await encryptFields(row));
+      await saveTracked(null,makeObservation(null,{...row,entryMethod:'direct',effectiveDate:localDate()}).account,'import');
       imported++;
     } catch (err) {
       console.error("[Import] Row failed:", err);
@@ -1621,255 +1701,82 @@ importCsvInput?.addEventListener("change", async () => {
 
 // ====== EVENTS ======
 
-// Add account (top form)
-form?.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const name = document.getElementById("card-name").value.trim();
-  const balance = parseDecimalInput(document.getElementById("balance").value);
-  const apr = parseDecimalInput(document.getElementById("apr").value);
-  const creditLimit = parseDecimalInput(document.getElementById("limit").value);
-
-  const errors = validateCardInput({ name, balance, apr, creditLimit });
-  const firstInvalid = applyFieldErrors(errors, TOP_FORM_FIELD_MAP);
-  if (firstInvalid) {
-    firstInvalid.focus();
-    return;
-  }
-  if (!userId) {
-    showModal("Authentication", "Please sign in to add accounts.");
-    return;
-  }
-
-  const cardsCollection = collection(
-    db,
-    `artifacts/${appId}/users/${userId}/cards`
-  );
-  const prevText = submitBtn.textContent;
-  try {
-    submitBtn.disabled = true;
-    submitBtn.textContent = "Adding…";
-    await setDoc(
-      doc(cardsCollection),
-      await encryptFields({ name, balance, apr, creditLimit })
-    );
-    toast("Account added");
-    form.reset();
-    applyFieldErrors({}, TOP_FORM_FIELD_MAP);
-  } catch (err) {
-    console.error("[Save] Add failed:", err);
-    showModal("Error", "Could not save the account.");
-  } finally {
-    submitBtn.disabled = false;
-    submitBtn.textContent = prevText;
-  }
+// Add and edit through one encrypted mutation service.
+function readEntry(root, prior=null) {
+  const top=root===form;
+  const ids={name:'card-name',balance:'balance',apr:'apr',creditLimit:'limit',availableCredit:'available-credit',entryMethod:'entry-method',effectiveDate:'observation-date',note:'account-note',reason:'account-reason'};
+  const get=key=>top?document.getElementById(ids[key])?.value:root.querySelector(`[data-field="${key}"]`)?.value;
+  return makeObservation(prior,{name:(get('name')??'').trim(),apr:get('apr'),creditLimit:get('creditLimit'),
+    availableCredit:get('availableCredit'),balance:get('balance'),entryMethod:get('entryMethod')??'direct',
+    effectiveDate:get('effectiveDate')||localDate(),note:get('note')??prior?.note??'',reason:get('reason')??'',
+    confirmObservation:root.querySelector('[data-field="confirmObservation"]')?.checked===true,
+  });
+}
+function refreshEntry(root) {
+  const top=root===form;
+  const find=key=>top?document.getElementById({entryMethod:'entry-method',balance:'balance',availableCredit:'available-credit',creditLimit:'limit'}[key]):root.querySelector(`[data-field="${key}"]`);
+  const balance=find('balance'),available=find('availableCredit'),method=find('entryMethod')?.value??'direct';
+  if(!balance)return;
+  balance.readOnly=method==='availableCredit';available?.closest('label, .entry-available')?.classList.toggle('hidden',method!=='availableCredit');
+  const preview=top?document.getElementById('balance-preview'):root.querySelector('.balance-preview');
+  if(method==='availableCredit'){
+    try{const estimate=estimateBalance(find('creditLimit').value,available.value);balance.value=(estimate.balanceCents/100).toFixed(2);if(preview)preview.textContent=estimate.availableExceedsLimit?'Available credit exceeds limit; verify issuer values.':estimate.atCapacity?'No available credit. An over-limit amount cannot be determined from this alone.':'Estimated balance = limit minus available credit.';}
+    catch{balance.value='';if(preview)preview.textContent='Enter limit and available credit to preview the estimated balance.';}
+  } else if(preview)preview.textContent='Direct balance entry. Use for legacy records or over-limit exceptions.';
+}
+form?.addEventListener('input',()=>refreshEntry(form));
+form?.addEventListener('change',()=>refreshEntry(form));
+form?.addEventListener('submit',async e=>{
+  e.preventDefault();submitBtn.disabled=true;
+  try{const result=readEntry(form);await saveTracked(null,result.account,'add');form.reset();document.getElementById('observation-date').value=localDate();refreshEntry(form);toast('Account saved; sync status shown above.');}
+  catch(error){showModal('Not saved',error.message||'Could not save the account.');}
+  finally{submitBtn.disabled=false;}
 });
-
-// Inline edit + delete (with Undo)
-cardList?.addEventListener("click", async (e) => {
-  const editBtn = e.target.closest(".inline-edit-btn");
-  const cancelBtn = e.target.closest(".cancel-inline-btn");
-  const saveBtn = e.target.closest(".save-inline-btn");
-  const deleteBtn = e.target.closest(".delete-btn");
-  const nudgeBtn = e.target.closest(".nudge-btn");
-
-  // Until the history mutation service lands, the legacy editor must never
-  // replace a tracking-enabled record with its four-field payload.
-  const mutationButton = editBtn || saveBtn || deleteBtn || nudgeBtn;
-  const existingAccount = mutationButton && window.__latestCards.find(c => c.id === mutationButton.dataset.id);
-  if (existingAccount?.schemaVersion === 2) {
-    showModal("Update required", "This account uses the new tracking format. Its history-enabled editor is required to change it safely.");
-    return;
-  }
-
-  if (nudgeBtn) {
-    if (!userId) {
-      showModal("Authentication", "Please sign in to update accounts.");
-      return;
-    }
-    const id = nudgeBtn.dataset.id;
-    const delta = +nudgeBtn.dataset.delta || 0;
-    const card = window.__latestCards.find((c) => c.id === id);
-    if (!card) return;
-    const newBalance = Math.max(
-      0,
-      Math.round(((+card.balance || 0) + delta) * 100) / 100
-    );
-
-    const cardsCollection = collection(
-      db,
-      `artifacts/${appId}/users/${userId}/cards`
-    );
-    nudgeBtn.disabled = true;
-    try {
-      await setDoc(
-        doc(cardsCollection, id),
-        await encryptFields({
-          name: card.name,
-          balance: newBalance,
-          apr: card.apr,
-          creditLimit: card.creditLimit,
-        })
-      );
-      card.balance = newBalance;
-      toast(delta < 0 ? "Balance decreased by $50" : "Balance increased by $50");
-      renderCards(window.__latestCards);
-    } catch (err) {
-      console.error("[Nudge] Update failed:", err);
-      showModal("Error", "Could not update the balance. Please try again.");
-      nudgeBtn.disabled = false;
-    }
-    return;
-  }
-
-  if (editBtn) {
-    editingId = editBtn.dataset.id;
-    renderCards(window.__latestCards);
-    cardList
-      .querySelector(`.save-inline-btn[data-id="${editingId}"]`)
-      ?.closest(".debt-card")
-      ?.querySelector("input[data-field]")
-      ?.focus();
-    return;
-  }
-  if (cancelBtn) {
-    editingId = null;
-    renderCards(window.__latestCards);
-    return;
-  }
-  if (saveBtn) {
-    const id = saveBtn.dataset.id;
-    const cardEl = saveBtn.closest(".debt-card");
-    if (!cardEl) return;
-
-    const getVal = (sel) => {
-      const inp = cardEl.querySelector(`input[data-field="${sel}"]`);
-      return inp ? inp.value : null;
-    };
-    const name = (getVal("name") || "").trim();
-    const balance = parseDecimalInput(getVal("balance"));
-    const apr = parseDecimalInput(getVal("apr"));
-    const creditLimit = parseDecimalInput(getVal("creditLimit"));
-
-    const errors = validateCardInput({ name, balance, apr, creditLimit });
-    const inlineFieldMap = {
-      name: {
-        input: () => cardEl.querySelector('input[data-field="name"]'),
-        error: () => cardEl.querySelector('[data-error-for="name"]'),
-      },
-      balance: {
-        input: () => cardEl.querySelector('input[data-field="balance"]'),
-        error: () => cardEl.querySelector('[data-error-for="balance"]'),
-      },
-      apr: {
-        input: () => cardEl.querySelector('input[data-field="apr"]'),
-        error: () => cardEl.querySelector('[data-error-for="apr"]'),
-      },
-      creditLimit: {
-        input: () => cardEl.querySelector('input[data-field="creditLimit"]'),
-        error: () => cardEl.querySelector('[data-error-for="creditLimit"]'),
-      },
-    };
-    const firstInvalid = applyFieldErrors(errors, inlineFieldMap);
-    if (firstInvalid) {
-      firstInvalid.focus();
-      return;
-    }
-    if (!userId) {
-      showModal("Authentication", "Please sign in to edit accounts.");
-      return;
-    }
-
-    const updated = { name, balance, apr, creditLimit };
-    const cardsCollection = collection(
-      db,
-      `artifacts/${appId}/users/${userId}/cards`
-    );
-    const prevHTML = saveBtn.innerHTML;
-
-    try {
-      saveBtn.disabled = true;
-      saveBtn.innerHTML = "Saving…";
-      await setDoc(doc(cardsCollection, id), await encryptFields(updated));
-
-      editingId = null;
-      toast("Account updated");
-
-      // Optimistic render
-      const idx = window.__latestCards.findIndex((c) => c.id === id);
-      if (idx !== -1)
-        window.__latestCards[idx] = {
-          ...window.__latestCards[idx],
-          ...updated,
-        };
-      renderCards(window.__latestCards);
-    } catch (err) {
-      console.error("[Save] Inline save failed:", err);
-      showModal("Error", "Saving failed. Please try again.");
-      if (saveBtn.isConnected) {
-        saveBtn.disabled = false;
-        saveBtn.innerHTML = prevHTML;
+cardList?.addEventListener('input',e=>{const card=e.target.closest('.debt-card');if(card)refreshEntry(card);});
+cardList?.addEventListener('change',e=>{const card=e.target.closest('.debt-card');if(card)refreshEntry(card);});
+cardList?.addEventListener('click',async e=>{
+  const button=e.target.closest('button[data-id]');if(!button)return;
+  const id=button.dataset.id;
+  const card=window.__latestCards.find(c=>c.id===id);if(!card)return;
+  if(button.classList.contains('inline-edit-btn')){editingBase=structuredClone(card);editingId=id;renderCards(window.__latestCards);cardList.querySelector('.save-inline-btn')?.closest('.debt-card')?.querySelector('input')?.focus();return;}
+  if(button.classList.contains('cancel-inline-btn')){editingId=null;editingBase=null;renderCards(window.__latestCards);return;}
+  button.disabled=true;
+  try{
+    if(button.classList.contains('save-inline-btn')){
+      const base=editingBase??card;const result=readEntry(button.closest('.debt-card'),base);
+      await saveTracked(base,result.account,result.historical?'historical-observation':result.observed?'observation':'edit',result.historical?{observation:result.observation}:{});
+      editingId=null;renderAll(window.__latestCards);toast(result.historical?'Historical observation saved; latest values retained.':'Update saved; sync status shown above.');
+    }else if(button.classList.contains('nudge-btn')){
+      const newBalance=Math.max(0,Math.round((card.balance+Number(button.dataset.delta))*100)/100);
+      const input={...fieldsOf(card),entryMethod:card.entryMethod??'direct',effectiveDate:localDate(),confirmObservation:true,balance:newBalance};
+      if(input.entryMethod==='availableCredit'){
+        if(newBalance>card.creditLimit)throw new Error('This adjustment exceeds the limit. Use direct entry for the over-limit amount.');
+        input.availableCredit=Math.round((card.creditLimit-newBalance)*100)/100;
       }
+      const result=makeObservation(card,input);await saveTracked(card,result.account,'adjustment',{appliedChange:Math.round((newBalance-card.balance)*100)});
+      toast('Balance adjustment saved.');
+    }else if(button.classList.contains('refresh-observation')){
+      const result=makeObservation(card,{...fieldsOf(card),entryMethod:card.entryMethod??'direct',effectiveDate:localDate(),confirmObservation:true});
+      await saveTracked(card,result.account,'observation');toast('Current values recorded as observed today.');
+    }else if(button.classList.contains('delete-btn')){
+      const after={...trackingFields(card),deletedAt:new Date().toISOString()};
+      const deleted=await saveTracked(card,after,'delete');
+      const ownerStore=tracking;
+      const undo=document.createElement('div');undo.className='tracker-undo';undo.textContent='Account removed. ';
+      const restore=document.createElement('button');restore.className='tracker-button';restore.textContent='Undo';undo.append(restore);document.body.append(undo);
+      restore.onclick=async()=>{if(ownerStore!==tracking)return;restore.disabled=true;try{await saveTracked(deleted,{...after,deletedAt:null},'restore');undo.remove();}catch(error){showModal('Restore failed',error.message);restore.disabled=false;}};
+      setTimeout(()=>undo.remove(),8000);
     }
-    return;
-  }
-  if (deleteBtn) {
-    if (!userId) {
-      showModal("Authentication", "Please sign in to delete accounts.");
-      return;
-    }
-    const id = deleteBtn.dataset.id;
-    const cardsCollection = collection(
-      db,
-      `artifacts/${appId}/users/${userId}/cards`
-    );
-
-    const snapshot = window.__latestCards.find((c) => c.id === id);
-    if (!snapshot) {
-      return;
-    }
-
-    try {
-      await deleteDoc(doc(cardsCollection, id));
-      announce("Account deleted. Undo available.");
-      let undone = false;
-
-      const undoEl = document.createElement("div");
-      undoEl.className =
-        "fixed bottom-4 right-4 z-[1100] bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-lg ring-1 ring-white/10 flex items-center gap-3";
-      undoEl.innerHTML = `<span>Account deleted</span>
-        <button class="px-2 py-1 bg-white text-gray-900 rounded hover:bg-gray-100 text-xs font-medium" id="undo-delete">Undo</button>`;
-      document.body.appendChild(undoEl);
-
-      const timer = setTimeout(() => {
-        if (undoEl.isConnected) undoEl.remove();
-      }, 8000);
-
-      undoEl
-        .querySelector("#undo-delete")
-        .addEventListener("click", async () => {
-          if (undone) return;
-          undone = true;
-          clearTimeout(timer);
-          if (undoEl.isConnected) undoEl.remove();
-
-          await setDoc(
-            doc(cardsCollection, id),
-            await encryptFields({
-              name: snapshot.name,
-              balance: snapshot.balance,
-              apr: snapshot.apr,
-              creditLimit: snapshot.creditLimit,
-            })
-          );
-          toast("Delete undone");
-        });
-    } catch (err) {
-      console.error("[Delete] Delete failed:", err);
-      showModal("Error", "Delete failed. Please try again.");
-    }
-    return;
-  }
+  }catch(error){showModal('Not saved',error.message||'Please try again.');}
+  finally{if(button.isConnected)button.disabled=false;}
 });
+function trackingFields(card){
+  if(card.schemaVersion===2)return fieldsOf(card);
+  const result=makeObservation(card,{...fieldsOf(card),entryMethod:'direct',effectiveDate:localDate()});
+  return result.account;
+}
+if(document.getElementById('observation-date'))document.getElementById('observation-date').value=localDate();
+refreshEntry(form);
 
 // Keyboard shortcuts (Enter=Save, Esc=Cancel)
 cardList?.addEventListener("keydown", (e) => {

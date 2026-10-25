@@ -9,7 +9,10 @@ caching/deployment. New forms and history writes are not enabled in this stage.
 Stage 2 persistence is implemented and tested: context-bound encrypted snapshots
 and events, an encrypted IndexedDB outbox, revision conflict detection, idempotent
 replay, and owner-only paired-write rules. Five emulator rule tests pass. UI
-integration follows in Stage 3. Stages 3-7 remain pending. No live cloud rules or
+integration is complete in Stage 3: calculated/default entry, direct-entry fallback,
+dated observations, APR-only freshness preservation, backdated entries, and
+encrypted mutations for add/edit/import/quick adjustments. Synthetic desktop/mobile
+browser checks pass. Stages 4-7 remain pending. No live cloud rules or
 deployment have been changed.
 
 ## Goal and scope
