@@ -51,7 +51,8 @@ encrypted in the browser** before it ever reaches Firestore.
 * **Per-card utilization** as **bar or donut** (toggle), risk badges
   (Healthy / Watch / Medium / High), and **0% APR** chips.
 * **Utilization targets:** per-card payment amounts below the progress bar, with
-  customizable planning targets. These are not promised credit-score breakpoints.
+  customizable planning targets. Each saved target also creates an overall
+  utilization/payment KPI. These are not promised credit-score breakpoints.
 * **Progress page:** overall/per-account balance trends, comparison KPIs, milestones,
   accessible observation tables, and utilization/limit charts.
 * **Manual statement/promotion references:** dates, optional payment/transfer records,
@@ -60,13 +61,17 @@ encrypted in the browser** before it ever reaches Firestore.
 ### 🧮 Planning tools
 * **Payoff strategies:** Debt Avalanche (highest APR) and Debt Snowball (lowest
   balance), alongside an estimated monthly interest ranking by account.
-* **Payoff Schedule Simulator:** enter a monthly budget + strategy to get an
-  estimated debt-free date, total interest paid, and payoff order.
+* **Payoff Plan:** compare Avalanche and Snowball side by side using one combined
+  monthly budget, or estimate the monthly amount needed for a target number of
+  months. Optional per-account baseline payments are planning inputs, not bank
+  minimums. See projected interest, total paid, first payoff, timelines and charts.
 * **Balance-Transfer Optimizer:** pick a 0% target card, optionally cap its
   utilization, and get a move list with monthly + intro-period net savings vs.
   fees.
 
 ### 🧰 Quality of life
+* **Three views:** Accounts for current balances, Payoff Plan for hypothetical
+  outcomes, and Progress for recorded history. Import/export live in Settings & data.
 * **Dark mode** (persisted, no flash of wrong theme).
 * **Import** legacy CSV/JSON and full backups; **Export** snapshot/history CSV or
   full JSON backups retaining account IDs, history, and settings.
@@ -282,11 +287,12 @@ Test locally against the new project before updating the production secrets.
 * **Utilization View**: switch **Bar ↔ Donut** in the controls.
 * **Inline edit**: click ✏️ → fields expand; **Enter** saves, **Esc** cancels.
 * **Quick pay**: ±$50 buttons for fast balance updates; **Undo delete** toast.
-* **Simulator**: enter a monthly budget + strategy → debt-free date, total
-  interest, payoff order.
+* **Payoff Plan**: compare Avalanche and Snowball using one combined monthly
+  budget, or estimate each strategy's budget for a target number of months.
+  Optional planned baseline payments are simulation inputs, not bank minimums.
 * **Optimizer**: pick the 0% target card, optionally cap its utilization → move
   list + net savings (intro vs. fees).
-* **Import/Export**: CSV or JSON from the header.
+* **Import/Export**: CSV or JSON from the header's **Settings & data** menu.
 
 ---
 

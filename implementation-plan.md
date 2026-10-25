@@ -577,3 +577,22 @@ seven-day stale indicators; manual in-app reminders; progress only from observed
 and adequately covered data. Earlier history cannot be reconstructed automatically.
 All research decisions above apply to the existing tools as well as new screens;
 preserve their capabilities while replacing misleading names and hidden assumptions.
+
+## Completed extension - 2026-10-25
+
+- Accounts, Payoff Plan, and Progress now share one unlocked session, with
+  import/export under Settings & data and legacy links retained.
+- Compare Avalanche and Snowball with either a combined monthly budget or target
+  months. Optional baseline payments are planning assumptions, never issuer
+  minimums. Show estimated interest, total paid, payoff timing/order, projected
+  balances, and a monthly table. Keep projections separate from observed history.
+- Model money in cents; disclose fixed APR, monthly interest, end-of-month
+  payments, and no new purchases/fees. Reject mixed/unknown APR and deferred
+  interest instead of manufacturing a result. Explicitly flag promotion expiry
+  limitations. Deadline comparisons use separate estimated monthly budgets.
+- Keep the 0% optimizer collapsed and manually available, with recorded promotion
+  context that does not assert transfer eligibility.
+- Generate overall utilization KPI cards for every saved custom threshold and
+  retain per-card nudges. Keep the save button compact at desktop/mobile widths.
+- Keep planning inputs/results in memory, clear them on logout, render account
+  names as text, and verify no financial writes result from simulations.
