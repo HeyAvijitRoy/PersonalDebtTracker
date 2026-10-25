@@ -12,9 +12,9 @@
     <link rel="apple-touch-icon" href="apple-touch-icon.png" sizes="180x180" />
 
     <!-- Apply saved/system theme before first paint to avoid a flash -->
-    <!-- data-cf-async="false" opts scripts out of Cloudflare Rocket Loader,
+    <!-- data-cfasync="false" opts scripts out of Cloudflare Rocket Loader,
          which otherwise reorders them and breaks Tailwind's runtime styling. -->
-    <script data-cf-async="false">
+    <script data-cfasync="false">
       (function () {
         try {
           const stored = localStorage.getItem("theme");
@@ -60,7 +60,7 @@
          Rebuild after changing markup/classes:
          npx tailwindcss@3.4.17 -c tailwind.config.js -i src/input.css -o styles.css --minify -->
     <link rel="stylesheet" href="styles.css" />
-    <script data-cf-async="false" src="env.js"></script>
+    <script data-cfasync="false" src="env.js"></script>
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
@@ -286,6 +286,7 @@
             backup after you add accounts.
           </div>
           <form id="lock-setup-form" class="space-y-3" novalidate>
+            <input id="lock-setup-form-username" type="text" name="username" autocomplete="username" class="hidden" tabindex="-1" aria-label="Signed-in account" readonly data-lock-username />
             <div>
               <label class="block text-sm text-gray-700 dark:text-gray-300 mb-1" for="lock-pass1"
                 >Passphrase</label
@@ -333,6 +334,7 @@
             session.
           </p>
           <form id="lock-unlock-form" class="space-y-3" novalidate>
+            <input id="lock-unlock-form-username" type="text" name="username" autocomplete="username" class="hidden" tabindex="-1" aria-label="Signed-in account" readonly data-lock-username />
             <div>
               <label class="block text-sm text-gray-700 dark:text-gray-300 mb-1" for="lock-pass"
                 >Passphrase</label
@@ -963,6 +965,6 @@
     </div>
 
     <!-- Scripts -->
-    <script data-cf-async="false" type="module" src="app.js"></script>
+    <script data-cfasync="false" type="module" crossorigin="anonymous" src="app.js"></script>
   </body>
 </html>

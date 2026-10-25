@@ -577,6 +577,7 @@ lockUnlockForm?.addEventListener("submit", async (e) => {
 });
 
 function clearUnlockedState() {
+  document.querySelectorAll("[data-lock-username]").forEach(input=>input.value="");
   addAccountDialog?.close();resetAddAccountForm();
   stopAccountReads?.();stopAccountReads=null;refreshAccounts=null;accountReader=null;
   document.getElementById('account-connection')?.classList.add('hidden');
@@ -639,6 +640,7 @@ function initFirebase() {
       const generation = sessionScope.generation;
       if (user) {
         userId = user.uid;
+        document.querySelectorAll("[data-lock-username]").forEach(input=>input.value=user.email||user.uid);
         firstSnapshotReceived = false;
         cryptoKey = null; // require unlock each session
         currentCryptoMeta = null;

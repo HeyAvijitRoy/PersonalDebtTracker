@@ -102,7 +102,7 @@ try {
  const header=await page.locator('.app-header').boundingBox();assert.ok(Math.abs(header.y)<2,'Header must remain at the viewport top while scrolling');
  await page.locator('#open-add-account').click();await page.locator('#card-name').fill('Private unfinished account');
  await page.evaluate(()=>document.getElementById('sign-out-btn').click());await page.locator("#main-app").waitFor({state:"hidden"});
- assert.equal(await page.locator("#card-list").textContent(),"");assert.equal(await page.locator("#add-account-dialog").isVisible(),false);assert.equal(await page.locator("#card-name").inputValue(),"");assert.deepEqual(errors,[]);
+ assert.equal(await page.locator("#card-list").textContent(),"");assert.equal(await page.locator("#add-account-dialog").isVisible(),false);assert.equal(await page.locator("#card-name").inputValue(),"");for(const input of await page.locator("[data-lock-username]").all())assert.equal(await input.inputValue(),"");assert.deepEqual(errors,[]);
  console.log("Browser smoke passed: calculated entry, edit, encrypted history, history dialog, archive totals, full backup, mobile layout, sign-out.");
  await context.close();
 } finally {await browser.close();}

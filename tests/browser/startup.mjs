@@ -7,6 +7,9 @@ try{
  // A fresh user must not see setup when the server cannot confirm absence.
  await page.addInitScript(()=>{globalThis.__syntheticMetaHangs=true;});await page.reload();
  await page.locator('#lock-loading').waitFor();
+ assert.equal(await page.locator('script[src="app.js"]').getAttribute('data-cfasync'),'false');
+ assert.equal(await page.locator('script[src="app.js"]').getAttribute('crossorigin'),'anonymous');
+ for(const id of ['lock-setup-form','lock-unlock-form'])assert.equal(await page.locator('#'+id+' input[autocomplete="username"]').inputValue(),'synthetic-owner');
  await page.locator('#lock-retry').waitFor({timeout:15000});
  assert.equal(await page.locator('#lock-setup').isVisible(),false);
  await page.evaluate(()=>globalThis.__syntheticMetaHangs=false);await page.locator('#lock-retry').click();
