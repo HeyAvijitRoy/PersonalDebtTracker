@@ -1,3 +1,8 @@
+import { encryptAccount, decryptAccount } from "./src/account-crypto.mjs";
+import { moneyToCents, aprToBasisPoints } from "./src/money.mjs";
+import { SessionScope } from "./src/session-scope.mjs";
+const sessionScope = new SessionScope();
+
 // ====== UI ELEMENTS ======
 const form = document.getElementById("debt-form");
 const cardList = document.getElementById("card-list");
@@ -264,45 +269,7 @@ async function deriveKey(passphrase, saltBytes) {
 
 // Encrypt the plaintext card fields into a storable ciphertext envelope.
 async function encryptFields(fields) {
-  if (!cryptoKey) throw new Error("Locked: no encryption key in memory.");
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const payload = textEnc.encode(
-    JSON.stringify({
-      name: fields.name ?? "",
-      balance: +fields.balance || 0,
-      apr: +fields.apr || 0,
-      creditLimit: +fields.creditLimit || 0,
-    })
-  );
-  const ct = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
-    cryptoKey,
-    payload
-  );
-  return { v: 1, iv: toB64(iv), data: toB64(ct) };
-}
-
-// Decrypt a raw Firestore card document back to plaintext fields.
-// All cards are encrypted envelopes { v, iv, data }; anything else is treated
-// as an error (surfaced by the caller) rather than silently coerced.
-async function decryptFields(raw) {
-  if (!cryptoKey) throw new Error("Locked: no encryption key in memory.");
-  if (
-    !raw ||
-    raw.v !== 1 ||
-    typeof raw.iv !== "string" ||
-    typeof raw.data !== "string"
-  ) {
-    throw new Error("Malformed or unrecognized card document.");
-  }
-  const iv = fromB64(raw.iv);
-  const ct = fromB64(raw.data);
-  const plaintext = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv },
-    cryptoKey,
-    ct
-  );
-  return JSON.parse(textDec.decode(plaintext));
+  return encryptAccount(fields, cryptoKey);
 }
 
 function metaDocRef(uid) {
@@ -317,6 +284,7 @@ async function loadCryptoMeta(uid) {
 // First-time setup: generate a salt, derive the key, store salt + a verifier
 // blob (encrypted known token) so future unlocks can validate the passphrase.
 async function createCryptoMeta(uid, passphrase) {
+  const generation = sessionScope.generation;
   const saltBytes = crypto.getRandomValues(new Uint8Array(16));
   const key = await deriveKey(passphrase, saltBytes);
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -330,12 +298,15 @@ async function createCryptoMeta(uid, passphrase) {
     salt: toB64(saltBytes),
     verifier: { iv: toB64(iv), data: toB64(ct) },
   });
+  if (!sessionScope.current(generation) || userId !== uid) throw new Error("Session changed. Sign in again.");
   cryptoKey = key;
 }
 
 // Returning session: derive the key and confirm the passphrase by decrypting
 // the verifier. Returns true on success, false on wrong passphrase.
 async function unlockWithPassphrase(meta, passphrase) {
+  const generation = sessionScope.generation;
+  const uid = userId;
   const saltBytes = fromB64(meta.salt);
   const key = await deriveKey(passphrase, saltBytes);
   try {
@@ -346,6 +317,7 @@ async function unlockWithPassphrase(meta, passphrase) {
   } catch (e) {
     return false; // AES-GCM auth-tag mismatch => wrong passphrase
   }
+  if (!sessionScope.current(generation) || !uid || userId !== uid) throw new Error("Session changed. Sign in again.");
   cryptoKey = key;
   return true;
 }
@@ -447,6 +419,36 @@ lockUnlockForm?.addEventListener("submit", async (e) => {
   }
 });
 
+function clearUnlockedState() {
+  sessionScope.invalidate();
+  if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+  cryptoKey = null;
+  currentCryptoMeta = null;
+  window.__latestCards = [];
+  firstSnapshotReceived = false;
+  editingId = null;
+  for (const id of ["card-list", "avalanche-list", "snowball-list", "expensive-list", "fico-hints", "bt-output", "sim-output"]) {
+    document.getElementById(id)?.replaceChildren();
+  }
+  for (const element of [totalDebtDisplay, totalCreditLineDisplay, totalMonthlyInterestDisplay, totalYearlyInterestDisplay]) {
+    if (element) element.textContent = "$0.00";
+  }
+  if (accountsMeta) accountsMeta.textContent = "";
+  if (overallUtilBar) overallUtilBar.style.width = "0%";
+  if (overallUtilText) overallUtilText.textContent = "0%";
+  btTargetSelect?.replaceChildren();
+  for (const id of ["lock-pass", "lock-pass1", "lock-pass2", "sim-budget", "bt-limit", "bt-fee", "bt-months", "bt-cap", "bt-target-name"]) {
+    const input = document.getElementById(id);
+    if (input) input.value = "";
+  }
+  form?.reset();
+  closeModal();
+  if (modalMessage) modalMessage.textContent = "";
+  if (modalTitle) modalTitle.textContent = "";
+  if (liveRegion) liveRegion.textContent = "";
+  mainApp?.classList.add("hidden");
+}
+
 function initFirebase() {
   try {
     const app = initializeApp(firebaseConfig);
@@ -460,7 +462,7 @@ function initFirebase() {
     getRedirectResult(auth)
       .then((res) => {
         if (res?.user)
-          console.log("[Auth] Redirect success for", res.user.email);
+          console.log("[Auth] Redirect sign-in completed.");
       })
       .catch((err) => {
         console.warn("[Auth] Redirect error:", err?.code, err?.message);
@@ -471,6 +473,8 @@ function initFirebase() {
       });
 
     onAuthStateChanged(auth, async (user) => {
+      clearUnlockedState();
+      const generation = sessionScope.generation;
       if (user) {
         userId = user.uid;
         firstSnapshotReceived = false;
@@ -484,13 +488,16 @@ function initFirebase() {
         setHeaderAuthUI(true, user.displayName);
         // Lock Mode gate: load crypto settings, then set up or unlock.
         try {
-          currentCryptoMeta = await loadCryptoMeta(user.uid);
+          const meta = await loadCryptoMeta(user.uid);
+          if (!sessionScope.current(generation) || userId !== user.uid) return;
+          currentCryptoMeta = meta;
           if (!currentCryptoMeta) {
             showLockSetup();
           } else {
             showLockUnlock();
           }
         } catch (err) {
+          if (!sessionScope.current(generation)) return;
           console.error("[Crypto] Failed to load crypto meta:", err);
           appLoading?.classList.add("hidden");
           showModal(
@@ -519,6 +526,8 @@ function initFirebase() {
 
 function setupFirestoreListener(uid) {
   if (unsubscribe) unsubscribe();
+  const generation = sessionScope.generation;
+  const listenerKey = cryptoKey;
   const cardsCollection = collection(
     db,
     `artifacts/${appId}/users/${uid}/cards`
@@ -526,10 +535,13 @@ function setupFirestoreListener(uid) {
   unsubscribe = onSnapshot(
     cardsCollection,
     async (snapshot) => {
+      if (!sessionScope.current(generation) || userId !== uid || cryptoKey !== listenerKey) return;
+      const ticket = sessionScope.startRead();
       const decrypted = [];
       for (const d of snapshot.docs) {
         try {
-          const fields = await decryptFields(d.data());
+          const fields = await decryptAccount(d.data(), listenerKey);
+          if (!sessionScope.accepts(ticket) || userId !== uid || cryptoKey !== listenerKey) return;
           decrypted.push({ id: d.id, ...fields });
         } catch (err) {
           // A doc we can't decrypt (e.g. wrong key) is skipped rather than
@@ -537,6 +549,7 @@ function setupFirestoreListener(uid) {
           console.error("[Crypto] Could not decrypt card", d.id, err);
         }
       }
+      if (!sessionScope.accepts(ticket) || userId !== uid || cryptoKey !== listenerKey) return;
       window.__latestCards = decrypted;
       if (editingId && !window.__latestCards.find((c) => c.id === editingId))
         editingId = null;
@@ -553,7 +566,7 @@ function setupFirestoreListener(uid) {
       console.error("[Firestore] onSnapshot error:", error);
       // Ignore errors that arrive after sign-out (e.g. permission-denied as
       // the listener tears down) — don't resurrect the data view.
-      if (!userId) return;
+      if (!sessionScope.current(generation) || userId !== uid || cryptoKey !== listenerKey) return;
       appLoading?.classList.add("hidden");
       mainApp?.classList.remove("hidden");
       showModal(
@@ -884,13 +897,14 @@ function validateCardInput({ name, balance, apr, creditLimit }) {
   const errors = {};
   if (!name) errors.name = "Enter an account name.";
   else if (name.length > 60) errors.name = "Keep the name under 60 characters.";
-  if (Number.isNaN(balance) || balance < 0)
-    errors.balance = "Enter a balance of 0 or more.";
-  if (Number.isNaN(apr) || apr < 0 || apr > 99.99)
-    errors.apr = "Enter an APR between 0 and 99.99.";
-  if (Number.isNaN(creditLimit) || creditLimit < 0)
-    errors.creditLimit = "Enter a credit limit of 0 or more.";
+  try { moneyToCents(balance); } catch { errors.balance = "Enter a balance of 0 or more, with at most two decimal places."; }
+  try { aprToBasisPoints(apr); } catch { errors.apr = "Enter an APR between 0 and 99.99, with at most two decimal places."; }
+  try { moneyToCents(creditLimit); } catch { errors.creditLimit = "Enter a credit limit of 0 or more, with at most two decimal places."; }
   return errors;
+}
+
+function parseDecimalInput(value) {
+  try { return moneyToCents(value) / 100; } catch { return NaN; }
 }
 
 const INVALID_INPUT_CLASSES = ["border-rose-500", "dark:border-rose-500", "focus:ring-rose-500"];
@@ -1498,9 +1512,9 @@ function parseCsv(text) {
   for (let i = 1; i < lines.length; i++) {
     const values = parseCsvLine(lines[i]);
     const name = (values[colIndex.name] || "").trim();
-    const balance = parseFloat(values[colIndex.balance]);
-    const apr = parseFloat(values[colIndex.apr]);
-    const creditLimit = parseFloat(values[colIndex.creditLimit]);
+    const balance = parseDecimalInput(values[colIndex.balance]);
+    const apr = parseDecimalInput(values[colIndex.apr]);
+    const creditLimit = parseDecimalInput(values[colIndex.creditLimit]);
     const fieldErrors = validateCardInput({ name, balance, apr, creditLimit });
     if (Object.keys(fieldErrors).length) {
       errors.push(`Row ${i + 1}: ${Object.values(fieldErrors).join(" ")}`);
@@ -1531,9 +1545,9 @@ function parseJson(text) {
   const errors = [];
   arr.forEach((entry, i) => {
     const name = (entry?.name ?? "").toString().trim();
-    const balance = parseFloat(entry?.balance);
-    const apr = parseFloat(entry?.apr);
-    const creditLimit = parseFloat(entry?.creditLimit);
+    const balance = parseDecimalInput(entry?.balance);
+    const apr = parseDecimalInput(entry?.apr);
+    const creditLimit = parseDecimalInput(entry?.creditLimit);
     const fieldErrors = validateCardInput({ name, balance, apr, creditLimit });
     if (Object.keys(fieldErrors).length) {
       errors.push(`Item ${i + 1}: ${Object.values(fieldErrors).join(" ")}`);
@@ -1611,9 +1625,9 @@ importCsvInput?.addEventListener("change", async () => {
 form?.addEventListener("submit", async (e) => {
   e.preventDefault();
   const name = document.getElementById("card-name").value.trim();
-  const balance = parseFloat(document.getElementById("balance").value);
-  const apr = parseFloat(document.getElementById("apr").value);
-  const creditLimit = parseFloat(document.getElementById("limit").value);
+  const balance = parseDecimalInput(document.getElementById("balance").value);
+  const apr = parseDecimalInput(document.getElementById("apr").value);
+  const creditLimit = parseDecimalInput(document.getElementById("limit").value);
 
   const errors = validateCardInput({ name, balance, apr, creditLimit });
   const firstInvalid = applyFieldErrors(errors, TOP_FORM_FIELD_MAP);
@@ -1657,6 +1671,15 @@ cardList?.addEventListener("click", async (e) => {
   const saveBtn = e.target.closest(".save-inline-btn");
   const deleteBtn = e.target.closest(".delete-btn");
   const nudgeBtn = e.target.closest(".nudge-btn");
+
+  // Until the history mutation service lands, the legacy editor must never
+  // replace a tracking-enabled record with its four-field payload.
+  const mutationButton = editBtn || saveBtn || deleteBtn || nudgeBtn;
+  const existingAccount = mutationButton && window.__latestCards.find(c => c.id === mutationButton.dataset.id);
+  if (existingAccount?.schemaVersion === 2) {
+    showModal("Update required", "This account uses the new tracking format. Its history-enabled editor is required to change it safely.");
+    return;
+  }
 
   if (nudgeBtn) {
     if (!userId) {
@@ -1723,9 +1746,9 @@ cardList?.addEventListener("click", async (e) => {
       return inp ? inp.value : null;
     };
     const name = (getVal("name") || "").trim();
-    const balance = parseFloat(getVal("balance"));
-    const apr = parseFloat(getVal("apr"));
-    const creditLimit = parseFloat(getVal("creditLimit"));
+    const balance = parseDecimalInput(getVal("balance"));
+    const apr = parseDecimalInput(getVal("apr"));
+    const creditLimit = parseDecimalInput(getVal("creditLimit"));
 
     const errors = validateCardInput({ name, balance, apr, creditLimit });
     const inlineFieldMap = {
@@ -1946,6 +1969,8 @@ googleSigninBtn?.addEventListener("click", async () => {
 
 signOutBtn?.addEventListener("click", async () => {
   try {
+    clearUnlockedState();
+    userId = null;
     // Tear down the live listener FIRST so it can't fire a post-sign-out
     // permission error that would re-show the data view.
     if (unsubscribe) {

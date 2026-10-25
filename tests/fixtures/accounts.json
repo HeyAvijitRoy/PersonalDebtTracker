@@ -1,0 +1,10 @@
+{
+  "legacy": [
+    { "name": "Everyday", "balance": 1234.56, "apr": 24.99, "creditLimit": 5000 },
+    { "name": "Paid off", "balance": 0, "apr": 0, "creditLimit": 1000 },
+    { "name": "Over limit", "balance": 1200, "apr": 19.99, "creditLimit": 1000 },
+    { "name": "Unknown limit", "balance": 125, "apr": 12, "creditLimit": 0 },
+    { "name": "<Account> & \"special\"", "balance": 0.01, "apr": 29.99, "creditLimit": 123.45 },
+    { "name": "Legacy precision", "balance": 12.345, "apr": 19.999, "creditLimit": 1234.567 }
+  ]
+}

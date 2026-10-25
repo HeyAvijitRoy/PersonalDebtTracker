@@ -1,10 +1,15 @@
 // Bump this on every deploy that changes cached assets; the activate
 // handler purges any cache that doesn't match, so old shells can't linger.
-const CACHE_NAME = "debt-tracker-v4";
+const CACHE_NAME = "debt-tracker-v5";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./app.js",
+  "./styles.css",
+  "./src/money.mjs",
+  "./src/account-model.mjs",
+  "./src/account-crypto.mjs",
+  "./src/session-scope.mjs",
   "./manifest.webmanifest",
   "./icon.svg",
 ];
@@ -38,10 +43,15 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
-  if (!req.url.startsWith(self.location.origin)) return;
+  if (new URL(req.url).origin !== self.location.origin) return;
 
   // Runtime config must never be served stale — let it go straight to network.
   if (req.url.includes("env.js")) return;
+
+  // Cache only public application assets, never arbitrary same-origin responses,
+  // configuration, backups, tests, or future financial-data endpoints.
+  const assetPaths = APP_SHELL.map(asset => new URL(asset, self.registration.scope).pathname);
+  if (!assetPaths.includes(new URL(req.url).pathname)) return;
 
   event.respondWith(
     fetch(req)

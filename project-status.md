@@ -8,6 +8,25 @@ Legend: ✅ shipped to `main` (live) · 🚧 on a branch, not yet merged ·
 
 ---
 
+## 2026-10-24
+
+### Account tracking foundation - `feature/account-tracking-progress` (local only)
+
+- Committed the agreed implementation plan separately before implementation.
+- Added integer-cent calculations for available-credit estimates, utilization
+  targets, and balance changes, plus versioned account readers and legacy fixtures.
+- Extracted bounded AES-GCM account serialization while retaining existing keys,
+  envelopes, and legacy account values. Future calculated-account metadata stays
+  inside ciphertext; the new entry forms and history writes are not enabled yet.
+- Added session guards so stale asynchronous reads cannot restore account data
+  after sign-out or replace a newer snapshot. Clear unlocked account views on
+  authentication changes and reject malformed numeric input at save/import.
+- Added dependency-free Node tests and CI checks; restricted service-worker caching
+  and public deployment artifacts to application assets.
+- Verified with unit/crypto/session tests, syntax checks, source checks, and local
+  HTTP module delivery. No authenticated browser, live Firebase rules, or cloud
+  deployment verification has been performed for this stage.
+
 ## 2026-07-25
 
 ### 🚧 🔒 PR-review hardening: encrypted-only, stricter rules — branch `lock-mode`

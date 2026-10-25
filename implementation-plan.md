@@ -1,6 +1,12 @@
 # Account tracking and progress implementation plan
 
-Prepared: 2026-10-24. Status: proposed; no features in this plan have been implemented.
+Prepared: 2026-10-24. Status: implementation started on `feature/account-tracking-progress`.
+
+Stage 1 foundation is implemented: cent-accurate calculation helpers, versioned
+account readers, legacy compatibility fixtures, bounded AES-GCM envelopes,
+session-safe asynchronous reads, a repeatable test command, and public-asset-only
+caching/deployment. New forms and history writes are not enabled in this stage.
+Stages 2-7 remain pending. No cloud rules or live deployment have been changed.
 
 ## Goal and scope
 

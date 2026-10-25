@@ -182,6 +182,24 @@ The content scanner reads `index.html` and `app.js`, so any class used there is
 included. (The old Tailwind Play CDN was removed — it isn't production-grade and
 broke behind Cloudflare Rocket Loader.)
 
+### Development checks
+
+Use Node.js 22 or newer; these checks need no npm dependencies:
+
+```powershell
+npm.cmd test
+npm.cmd run check
+```
+
+On macOS/Linux, use `npm test` and `npm run check` (not run on those platforms).
+The tests cover money calculations, account-schema compatibility, AES-GCM
+round-trips/tamper rejection, session boundaries, and public-asset caching.
+They do not replace authenticated browser or Firestore security-rule tests.
+
+The next implementation stages are tracked in
+[`implementation-plan.md`](implementation-plan.md). The new available-credit
+forms and encrypted history are not enabled by the foundation stage.
+
 ---
 
 ## 🔐 Security Rules
