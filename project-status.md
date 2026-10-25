@@ -1,3 +1,18 @@
+## 2026-10-25 - Account controls and dark-mode usability
+
+- Made Update balance and View history the visible card actions. Grouped planning,
+  payment/transfer records, observation confirmation and lifecycle actions under
+  an accessible Actions disclosure; all existing capabilities remain available.
+- Added confirmation dialogs for archive/unarchive, issuer-status changes and
+  deletion, with Cancel focused first and unchanged Undo/history behavior.
+  Account names are inserted as text, and session changes cancel pending actions.
+- Padded and centered day inputs with consistent dark-mode colors; spaced checkbox
+  labels and aligned wrapped text across filters, inline editing and dialogs.
+- Verified 55 unit checks and three browser suites, including cancellation,
+  issuer-status preservation of debt, keyboard controls and dark/mobile styling.
+  Visually reviewed dark mobile cards, Actions and planning references. Cache v11.
+  Local branch only; no push or deployment.
+
 ## 2026-10-25 - Recover account loading after unlock
 
 - Extended authenticated HTTPS fallback to account and history reads; added an

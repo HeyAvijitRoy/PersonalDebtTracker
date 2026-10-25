@@ -100,7 +100,7 @@ credential folders, test fixtures, or backups as a general directory server woul
    block old-client writes while preserving legacy reads; keep this maintenance
    gap short. Test owner and foreign-user access against the actual deployed rules.
 3. Publish this branch's tested application assets through the normal Pages
-   workflow. Service-worker cache v10 replaces older asset caches.
+   workflow. Service-worker cache v11 replaces older asset caches.
 4. Verify real sign-in/unlock, one account update with its encrypted event,
    offline/reconnect, backup/restore, Progress, and sign-out on the live deployment.
 5. Keep a schema-compatible client for rollback. Do not restore the old four-field
@@ -145,3 +145,20 @@ weakened or deployed. Local validation: 55 unit checks, 10 emulator rule checks
 all three browser suites. Startup coverage includes a stalled account listener,
 authenticated HTTPS account loading, and encrypted offline account recovery.
 The user's real authenticated session still needs a local retry.
+
+
+## Account UX refinement (2026-10-25)
+
+Routine balance updates and history stay visible. A native keyboard-accessible
+Actions disclosure groups all other account operations. Archive/unarchive,
+issuer-open/closed changes and deletion require an explanatory confirmation;
+Cancel is initially focused, Escape cancels, and sign-out cannot apply a pending
+confirmation to a different session. Deletion keeps the existing Undo window.
+Checkbox spacing and wrapping are consistent throughout dialogs and filters.
+Reminder/stale-day inputs use padded, centered, dark-mode-aware controls.
+
+Browser validation covers cancelled archive/status actions, confirmed lifecycle
+changes without dropping outstanding debt, menu keyboard access, checkbox spacing,
+dark day-field padding, 390px/320px layouts, existing records/backup/Undo flows and
+private-state clearing. Dark mobile screenshots were visually inspected. No new
+financial calculations, storage format, permissions or dependencies were added.

@@ -6,7 +6,7 @@ import { indexedOutbox } from "./src/outbox.mjs";
 import { firestoreAdapter } from "./src/firestore-adapter.mjs";
 import { makeObservation,localDate } from "./src/observations.mjs";
 import { estimateBalance,paymentToTarget } from "./src/money.mjs";
-import { showHistory,makeBackup,restoreBackup,historyCSV,trackingDialog,element as uiElement,button as uiButton } from "./src/account-tools.mjs";
+import { showHistory,makeBackup,restoreBackup,historyCSV,trackingDialog,confirmAction,element as uiElement,button as uiButton } from "./src/account-tools.mjs";
 import { BACKUP_FORMAT,validateBackup,csvCell } from "./src/backup.mjs";
 import { showPlanning,showPayment,showTransfer } from "./src/planning-ui.mjs";
 import { scenarioCost,reminders } from "./src/planning.mjs";
@@ -1230,22 +1230,7 @@ function renderCards(cards) {
               >+$50</button>
             </div>
           </div>
-          <div class="flex gap-2 shrink-0 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity">
-            <button
-              class="inline-edit-btn w-9 h-9 flex items-center justify-center rounded-full bg-sky-600 text-white hover:bg-sky-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 transition-colors"
-              data-id="${card.id}" title="Edit" aria-label="Edit">
-              <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M15.232 5.232l3.536 3.536M4 20h4l10.5-10.5a2.5 2.5 0 10-3.536-3.536L4 16v4z"/>
-              </svg>
-            </button>
-            <button
-              class="delete-btn w-9 h-9 flex items-center justify-center rounded-full bg-rose-500 text-white hover:bg-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 transition-colors"
-              data-id="${card.id}" title="Delete" aria-label="Delete">
-              <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M6 7h12M9 7V5a2 2 0 012-2h2a2 2 0 012 2v2m1 0v12a2 2 0 01-2 2H8a2 2 0 01-2-2V7"/>
-              </svg>
-            </button>
-          </div>
+
         </div>
 
         <div class="mt-3">
@@ -1267,15 +1252,24 @@ function renderCards(cards) {
           `
           }
           ${renderCardFicoHint(card)}
-            <div class="tracker-actions">
-              <button class="tracker-button" data-account-action="planning" data-id="${card.id}">Statement & planning</button>
-              <button class="tracker-button" data-account-action="payment" data-id="${card.id}">Record payment</button>
-              <button class="tracker-button" data-account-action="transfer" data-id="${card.id}">Record transfer</button>
-              <button class="tracker-button" data-account-action="history" data-id="${card.id}">View history</button>
-              <button class="tracker-button" data-account-action="archive" data-id="${card.id}">${card.archived?'Unarchive':'Archive'}</button>
-              <button class="tracker-button" data-account-action="status" data-id="${card.id}">${card.status==='closed'?'Mark issuer-open':'Mark issuer-closed'}</button>
+            <div class="account-toolbar">
+              <button type="button" class="inline-edit-btn account-update" data-id="${card.id}">Update balance</button>
+              <button type="button" class="account-history" data-account-action="history" data-id="${card.id}">View history</button>
+              <details class="account-menu">
+                <summary>Actions</summary>
+                <div class="account-menu-panel">
+                  <p class="account-menu-heading">Planning & records</p>
+                  <button type="button" data-account-action="planning" data-id="${card.id}">Statement & planning</button>
+                  <button type="button" data-account-action="payment" data-id="${card.id}">Record payment</button>
+                  <button type="button" data-account-action="transfer" data-id="${card.id}">Record transfer</button>
+                  <button type="button" class="refresh-observation" data-id="${card.id}">Confirm current values as observed today</button>
+                  <p class="account-menu-heading">Manage account</p>
+                  <button type="button" data-account-action="archive" data-id="${card.id}">${card.archived?'Unarchive':'Archive'}</button>
+                  <button type="button" data-account-action="status" data-id="${card.id}">${card.status==='closed'?'Mark issuer-open':'Mark issuer-closed'}</button>
+                  <button type="button" class="delete-btn account-remove" data-id="${card.id}">Delete account</button>
+                </div>
+              </details>
             </div>
-            <button class="refresh-observation tracker-button" data-id="${card.id}">Record current values as observed today</button>
 
         </div>
       `;
@@ -1825,6 +1819,15 @@ form?.addEventListener('submit',async e=>{
   catch(error){showModal('Not saved',error.message||'Could not save the account.');}
   finally{submitBtn.disabled=false;}
 });
+cardList?.addEventListener('toggle',e=>{
+  if(!e.target.matches('.account-menu[open]'))return;
+  cardList.querySelectorAll('.account-menu[open]').forEach(menu=>{if(menu!==e.target)menu.open=false;});
+},true);
+cardList?.addEventListener('keydown',e=>{
+  if(e.key!=='Escape')return;
+  const menu=e.target.closest('.account-menu[open]');if(!menu)return;
+  menu.open=false;menu.querySelector('summary').focus();e.preventDefault();
+});
 cardList?.addEventListener('input',e=>{const card=e.target.closest('.debt-card');if(card)refreshEntry(card);});
 cardList?.addEventListener('change',e=>{const card=e.target.closest('.debt-card');if(card)refreshEntry(card);});
 cardList?.addEventListener('click',async e=>{
@@ -1852,6 +1855,8 @@ cardList?.addEventListener('click',async e=>{
       const result=makeObservation(card,{...fieldsOf(card),entryMethod:card.entryMethod??'direct',effectiveDate:localDate(),confirmObservation:true});
       await saveTracked(card,result.account,'observation');toast('Current values recorded as observed today.');
     }else if(button.classList.contains('delete-btn')){
+      const owner=tracking;
+      if(!await confirmAction('Delete account?',`Delete ${card.name} and its history? You can undo for 8 seconds; after that, permanent cleanup begins.`,'Delete account')||owner!==tracking)return;
       const after={...trackingFields(card),deletedAt:new Date().toISOString()};
       const deleted=await saveTracked(card,after,'delete');
       const ownerStore=tracking;
@@ -1871,7 +1876,15 @@ function trackingFields(card){
 cardList?.addEventListener('click',async e=>{
  const button=e.target.closest('[data-account-action]');if(!button)return;
  const card=window.__latestCards.find(c=>c.id===button.dataset.id);if(!card||!tracking)return;
+ const owner=tracking;
+ button.closest('details')?.removeAttribute('open');
  try{
+  if(['archive','status'].includes(button.dataset.accountAction)){
+   const archive=button.dataset.accountAction==='archive';
+   const title=archive?(card.archived?'Unarchive account?':'Archive account?'):(card.status==='closed'?'Mark account issuer-open?':'Mark account issuer-closed?');
+   const explanation=archive?(card.archived?'This returns the account to your usual account list. Its history and totals stay intact.':'This hides the account from your usual list. Its balance remains in totals and its history is preserved.'):(card.status==='closed'?'This includes its limit in open-account utilization again. No balance or history is removed.':'Use this when the issuer has closed the account. Outstanding debt stays tracked; its limit is excluded from open-account utilization.');
+   if(!await confirmAction(title,card.name+'. '+explanation,archive?(card.archived?'Unarchive':'Archive'):(card.status==='closed'?'Mark issuer-open':'Mark issuer-closed'))||owner!==tracking)return;
+  }
   const context={save:saveTracked,trackingFields,getCard:id=>window.__latestCards.find(c=>c.id===id),cards:()=>window.__latestCards};
   if(button.dataset.accountAction==='planning'){await showPlanning(tracking,card,context);return;}
   if(button.dataset.accountAction==='payment'){showPayment(tracking,card,context);return;}

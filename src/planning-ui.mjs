@@ -9,7 +9,7 @@ import { interestStatus,statementRemainder,paymentRecords,adjustedAccount } from
 function field(root,label,type,value,choices=[]){
  const wrap=element("label",label);const input=element(type==="select"?"select":"input");input.className="tracker-input";
  if(type==="select")for(const [key,text] of choices){const option=element("option",text);option.value=key;input.append(option);}else{input.type=type;if(type==="number"){input.min="0";input.step="0.01";}}
- if(type==="checkbox"){input.checked=Boolean(value);input.className="";}else input.value=String(value??"");wrap.append(input);root.append(wrap);return input;
+ if(type==="checkbox"){input.checked=Boolean(value);input.className="";wrap.prepend(input);}else{input.value=String(value??"");wrap.append(input);}root.append(wrap);return input;
 }
 function formAction(form,label,callback){const submit=button(label,null);submit.type="submit";const error=element("p",null,"tracker-help");error.setAttribute("role","alert");form.append(submit,error);form.onsubmit=async e=>{e.preventDefault();submit.disabled=true;try{await callback();}catch(reason){error.textContent=reason.message;}finally{submit.disabled=false;}};}
 export async function showPlanning(store,card,context){

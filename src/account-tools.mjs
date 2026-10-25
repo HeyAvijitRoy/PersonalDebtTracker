@@ -10,6 +10,19 @@ export function trackingDialog(title) {
  const dialog=element("dialog",null,"tracking-dialog");const heading=element("h2",title,"text-lg font-semibold");heading.id=`dialog-${crypto.randomUUID()}`;dialog.setAttribute("aria-labelledby",heading.id);
  const body=element("div");const close=button("Close",()=>dialog.close());dialog.append(heading,body,close);dialog.addEventListener("close",()=>dialog.remove());document.body.append(dialog);dialog.showModal();return {dialog,body};
 }
+export function confirmAction(title,message,confirmLabel) {
+ return new Promise(resolve=>{
+  const origin=document.activeElement;
+  const returnFocus=origin?.closest('.account-menu')?.querySelector('summary')??origin;
+  const {dialog,body}=trackingDialog(title);
+  const description=element('p',null,'text-sm leading-relaxed');description.id=`description-${crypto.randomUUID()}`;
+  description.textContent=message;body.replaceChildren(description);dialog.setAttribute('aria-describedby',description.id);
+  const cancel=dialog.lastElementChild;cancel.textContent='Cancel';
+  let confirmed=false;
+  const confirm=button(confirmLabel,()=>{confirmed=true;dialog.close();});confirm.classList.add('account-confirm');
+  dialog.append(confirm);dialog.addEventListener('close',()=>{if(returnFocus?.isConnected)returnFocus.focus();resolve(confirmed);},{once:true});cancel.focus();
+ });
+}
 export async function showHistory(store,card,onCorrect){
  const {dialog,body}=trackingDialog(`${card.name} - history`);body.textContent="Loading encrypted history...";
  let cursors={},rows=[],more=true,from="",to="";
