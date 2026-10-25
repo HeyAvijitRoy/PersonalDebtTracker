@@ -1,6 +1,7 @@
 import { chromium } from "playwright";
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { app,auth,firestore } from "./firebase-stub.mjs";
 const browser=await chromium.launch({headless:true});
 try {
@@ -29,11 +30,21 @@ try {
  await page.waitForFunction(()=>document.querySelector("#sync-status")?.textContent.includes("No local drafts"));
  const count=await page.evaluate(()=>[...__syntheticDocs.keys()].filter(k=>k.includes('/events/')).length);assert.equal(count,2);
  assert.equal(await page.evaluate(()=>[...__syntheticDocs.values()].some(v=>Object.hasOwn(v,'balance'))),false);
+ await page.getByRole('button',{name:'View history',exact:true}).click();
+ await page.locator('.tracker-history-row').first().waitFor();assert.equal(await page.locator('.tracker-history-row').count(),2);
+ await page.locator('dialog').getByRole('button',{name:'Close',exact:true}).click();
+ await page.getByRole('button',{name:'Archive',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelectorAll('.debt-card').length===0);
+ assert.equal(await page.locator('#total-debt').textContent(),'$1,500.00');
+ await page.locator('#show-archived').check();await page.getByRole('button',{name:'Unarchive',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('#sync-status')?.textContent.includes('No local drafts'));
+ const downloaded=page.waitForEvent('download');await page.locator('button[onclick="exportData(\'json\')"]').first().click();
+ const backup=JSON.parse(await readFile(await (await downloaded).path(),'utf8'));assert.equal(backup.accounts.length,1);assert.ok(backup.accounts[0].events.length>=4);
  await mkdir("test-results",{recursive:true});await page.screenshot({path:"test-results/accounts-desktop.png",fullPage:true});
  await page.setViewportSize({width:390,height:844});await page.screenshot({path:"test-results/accounts-mobile.png",fullPage:true});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,"Mobile horizontal overflow");
  await page.locator("#sign-out-btn").click();await page.locator("#main-app").waitFor({state:"hidden"});
  assert.equal(await page.locator("#card-list").textContent(),"");assert.deepEqual(errors,[]);
- console.log("Browser smoke passed: calculated entry, edit, encrypted history, mobile layout, sign-out.");
+ console.log("Browser smoke passed: calculated entry, edit, encrypted history, history dialog, archive totals, full backup, mobile layout, sign-out.");
  await context.close();
 } finally {await browser.close();}

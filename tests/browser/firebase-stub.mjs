@@ -28,12 +28,13 @@ export const runTransaction=async(_db,fn)=>{
  const writes=[];const result=await fn({get:async reference=>snapshot(reference.path),set:(reference,value)=>writes.push([reference.path,value])});
  writes.forEach(([path,value])=>docs.set(path,structuredClone(value)));emit();return result;
 };
-export const orderBy=field=>({kind:'order',field});export const limit=count=>({kind:'limit',count});export const startAfter=id=>({kind:'after',id});
+export const orderBy=(field,direction)=>({kind:'order',field,direction});export const limit=count=>({kind:'limit',count});export const startAfter=id=>({kind:'after',id});
 export const query=(reference,...constraints)=>({...reference,constraints});
 export const getDocs=async reference=>{
  let paths=[...docs.keys()].filter(path=>path.startsWith(reference.path+'/')&&path.split('/').length===reference.path.split('/').length+1).sort();
- for(const c of reference.constraints??[]){if(c.kind==='after')paths=paths.filter(p=>p.split('/').at(-1)>c.id);if(c.kind==='limit')paths=paths.slice(0,c.count);}
+ for(const c of reference.constraints??[]){if(c.kind==='order'&&c.direction==='desc')paths.reverse();if(c.kind==='after')paths=paths.filter(p=>p.split('/').at(-1)<c.id);if(c.kind==='limit')paths=paths.slice(0,c.count);}
  return {docs:paths.map(snapshot),size:paths.length,empty:paths.length===0};
 };
+export const getDocsFromServer=getDocs;
 export const writeBatch=()=>{const operations=[];return {delete:reference=>operations.push(()=>docs.delete(reference.path)),set:(reference,value)=>operations.push(()=>docs.set(reference.path,value)),commit:async()=>{operations.forEach(fn=>fn());emit();}};};
 `;

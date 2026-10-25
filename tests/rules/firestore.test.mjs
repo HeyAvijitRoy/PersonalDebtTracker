@@ -47,3 +47,11 @@ test("legacy data remains readable but can only upgrade through a paired write",
  await assertFails(setDoc(doc(db,path),legacy));await assertSucceeds(paired(db,"upgraded","legacy"));
  await assertFails(setDoc(doc(db,path),legacy));
 });
+test("backup history is owner-only and immutable until purge",async()=>{
+ const db=env.authenticatedContext('owner').firestore();await paired(db,'first');
+ const restored=doc(db,`${path}/restored/imported`);
+ await assertSucceeds(setDoc(restored,event('imported','backup')));
+ await assertFails(setDoc(restored,event('imported','backup')));
+ await assertFails(getDoc(doc(env.authenticatedContext('other').firestore(),`${path}/restored/imported`)));
+ await assertFails(deleteDoc(restored));await paired(db,'purge','first',true);await assertSucceeds(deleteDoc(restored));
+});

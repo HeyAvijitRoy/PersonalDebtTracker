@@ -34,9 +34,9 @@ export class TrackingStore {
   enqueue(view,after,type="edit",details={}) {
     const run=async()=>{
       this.active();const key=this.key;
-      const id=crypto.randomUUID();const accountId=safeId(view?.id??crypto.randomUUID());
+      const id=`${Date.now().toString(36).padStart(10,"0")}-${crypto.randomUUID()}`;const accountId=safeId(view?.id??crypto.randomUUID());
       const normalized=readAccount(fieldsOf(after));
-      const prior=view?readAccount(fieldsOf(view)):null;
+      const prior=view?.name?readAccount(fieldsOf(view)):null;
       if(prior && type==="edit" && JSON.stringify(prior)===JSON.stringify(normalized)) return null;
       const pending=await this.pending();
       const operation={id,accountId,base:view?view._revision??"legacy-missing":"absent",after:normalized,type,details,recordedAt:new Date().toISOString()};
@@ -63,6 +63,17 @@ export class TrackingStore {
             const eventPath=`${path}/events/${op.id}`;
             const [raw,eventRaw]=await Promise.all([tx.get(path),tx.get(eventPath)]);
             this.active();
+            if(op.type==="restore-history"){
+              if(!raw||raw.purging)throw new Error("Restore the account snapshot first.");
+              const restored=op.details.event;
+              safeId(restored.id);
+              const restoredPath=`${path}/restored/${restored.id}`;
+              const livePath=`${path}/events/${restored.id}`;
+              const [existing,live]=await Promise.all([tx.get(restoredPath),tx.get(livePath)]);
+              if(existing||live){const data=await decryptEvent(existing??live,key,existing?restoredPath:livePath);if(JSON.stringify(data)!==JSON.stringify(restored))throw new Error("Backup event conflicts with existing history.");return;}
+              const sealed=await sealJSON(restored,key,restoredPath,32768);this.active();
+              tx.set(restoredPath,{...sealed,v:2,revision:restored.id,previous:"backup"});return;
+            }
             if(eventRaw) {await decryptEvent(eventRaw,key,eventPath);return;}
             if(raw?.purging)throw new Error("Permanent deletion is in progress.");
             if(revisionOf(raw)!==op.base) {const error=new Error("A newer version exists. Review your saved draft before applying it.");error.code="conflict";throw error;}

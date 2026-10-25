@@ -16,4 +16,11 @@
   .tracker-details { @apply text-sm my-3; }
   .tracker-details summary { @apply cursor-pointer py-2 font-medium; }
   .tracker-undo { @apply fixed bottom-4 right-4 z-[1100] bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-lg; }
+  .tracker-actions { @apply flex flex-wrap gap-2 my-2; }
+  .tracking-dialog { @apply rounded-xl p-5 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-xl border border-gray-200 dark:border-gray-700; width: min(46rem, calc(100vw - 2rem)); max-height: 90vh; overflow-y: auto; }
+  .tracking-dialog::backdrop { background: rgba(0,0,0,.6); }
+  .tracking-dialog h2 { @apply mb-3; }
+  .tracking-dialog label { @apply block my-2 text-sm; }
+  .tracking-dialog > button { @apply mt-4; }
+  .tracker-history-row { @apply border-t border-gray-200 dark:border-gray-700 py-3 text-sm; }
 }

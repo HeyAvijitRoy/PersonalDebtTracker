@@ -12,7 +12,10 @@ replay, and owner-only paired-write rules. Five emulator rule tests pass. UI
 integration is complete in Stage 3: calculated/default entry, direct-entry fallback,
 dated observations, APR-only freshness preservation, backdated entries, and
 encrypted mutations for add/edit/import/quick adjustments. Synthetic desktop/mobile
-browser checks pass. Stages 4-7 remain pending. No live cloud rules or
+browser checks pass. Stage 4 adds paginated history/corrections, freshness filters,
+archive/issuer-status controls, frozen batched deletion/Undo, full JSON history
+backup/restore with stable identities, and formula-safe CSV exports. Six emulator
+rule tests cover live and restored history. Stages 5-7 remain pending. No live cloud rules or
 deployment have been changed.
 
 ## Goal and scope

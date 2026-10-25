@@ -6,8 +6,11 @@ import { indexedOutbox } from "./src/outbox.mjs";
 import { firestoreAdapter } from "./src/firestore-adapter.mjs";
 import { makeObservation,localDate } from "./src/observations.mjs";
 import { estimateBalance,paymentToTarget } from "./src/money.mjs";
+import { showHistory,makeBackup,restoreBackup,historyCSV,trackingDialog,element as uiElement,button as uiButton } from "./src/account-tools.mjs";
+import { BACKUP_FORMAT,validateBackup,csvCell } from "./src/backup.mjs";
 const sessionScope = new SessionScope();
 let tracking=null,cloudCards=[],pendingRows=[],viewSequence=0;
+let cleanupRunning=false;
 
 // ====== UI ELEMENTS ======
 const form = document.getElementById("debt-form");
@@ -373,12 +376,26 @@ async function refreshTrackingView() {
   const blocked=new Set(rows.filter(row=>row.status==="conflict").map(row=>row.operation.accountId));
   const view=new Map(cloudCards.map(card=>[card.id,card]));
   for(const row of rows) {
-    const op=row.operation;if(blocked.has(op.accountId))continue;
+    const op=row.operation;if(blocked.has(op.accountId)||op.type==='restore-history')continue;
     view.set(op.accountId,{...op.after,id:op.accountId,_revision:op.id,_pending:true});
   }
   window.__latestCards=[...view.values()].filter(card=>!card.deletedAt);
   renderAll(window.__latestCards);
   renderSyncStatus();
+  cleanupDeletedAccounts().catch(()=>{});
+}
+
+async function cleanupDeletedAccounts(){
+  const store=tracking;if(!store||cleanupRunning)return;cleanupRunning=true;
+  try{
+    for(const card of cloudCards.filter(card=>card.deletedAt)){
+      store.active();if(pendingRows.some(row=>row.operation.accountId===card.id))continue;
+      const remaining=8000-(Date.now()-Date.parse(card.deletedAt));
+      if(remaining>0){setTimeout(()=>cleanupDeletedAccounts().catch(()=>{}),remaining+50);continue;}
+      if(!card._purging){await store.enqueue(card,fieldsOf(card),'purge');await store.flush();setTimeout(()=>cleanupDeletedAccounts().catch(()=>{}),100);return;}
+      await store.adapter.purge(cardPath(store.namespace,card.id),()=>!store.closed&&store.isActive());
+    }
+  }finally{cleanupRunning=false;}
 }
 
 function renderSyncStatus() {
@@ -478,6 +495,7 @@ lockUnlockForm?.addEventListener("submit", async (e) => {
 function clearUnlockedState() {
   tracking?.close();tracking=null;cloudCards=[];pendingRows=[];viewSequence++;
   document.querySelectorAll(".tracker-undo").forEach(element=>element.remove());
+  document.querySelectorAll(".tracking-dialog").forEach(dialog=>{dialog.close();dialog.remove();});
   sessionScope.invalidate();
   if (unsubscribe) { unsubscribe(); unsubscribe = null; }
   cryptoKey = null;
@@ -660,10 +678,11 @@ function computeTotals(cards) {
       l = +c.creditLimit || 0,
       a = +c.apr || 0;
     debt += b;
-    limit += l;
+    if(c.status!=="closed")limit += l;
     monthly += monthlyInterest(b, a);
   }
-  const util = limit > 0 ? (debt / limit) * 100 : 0;
+  const openDebt=cards.filter(c=>c.status!=="closed").reduce((sum,c)=>sum+(+c.balance||0),0);
+  const util = limit > 0 ? (openDebt / limit) * 100 : 0;
   return { debt, limit, monthly, util };
 }
 function computeCardUtilization(card) {
@@ -1070,10 +1089,14 @@ function renderCards(cards) {
     return;
   }
 
+  const showArchived=document.getElementById('show-archived')?.checked;
+  const staleOnly=document.getElementById('stale-only')?.checked;
+  const staleDays=Number(document.getElementById('stale-days')?.value)||7;
+  const visible=cards.filter(card=>(showArchived||!card.archived)&&(!staleOnly||!card.effectiveDate||(Date.now()-Date.parse(card.effectiveDate+'T00:00:00'))/86400000>=staleDays));
   const query = searchQuery.trim().toLowerCase();
   const filtered = query
-    ? cards.filter((c) => (c.name || "").toLowerCase().includes(query))
-    : cards;
+    ? visible.filter((c) => (c.name || "").toLowerCase().includes(query))
+    : visible;
 
   if (!filtered.length) {
     if (noCardsMessage) {
@@ -1134,6 +1157,12 @@ function renderCards(cards) {
             </div>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Est. monthly interest per $100: ${fmtMoney(interestPer100(apr))}</p>
             <p class="tracker-help">${card.entryMethod==='availableCredit'?'Estimated from available credit: '+fmtMoney(card.availableCredit):'Direct balance entry'} ? ${card.effectiveDate?'Observed '+escapeHtml(card.effectiveDate):'Observation date not recorded'}${card._pending?' ? Pending sync':''}</p>
+            <p class="tracker-help">${card.archived?'Archived (still included in totals). ':''}${card.status==='closed'?'Issuer-closed; outstanding balance remains tracked. ':''}${!card.effectiveDate||(Date.now()-Date.parse(card.effectiveDate+'T00:00:00'))/86400000>=Number(document.getElementById('stale-days')?.value||7)?'Balance needs an update.':''}</p>
+            <div class="tracker-actions">
+              <button class="tracker-button" data-account-action="history" data-id="${card.id}">View history</button>
+              <button class="tracker-button" data-account-action="archive" data-id="${card.id}">${card.archived?'Unarchive':'Archive'}</button>
+              <button class="tracker-button" data-account-action="status" data-id="${card.id}">${card.status==='closed'?'Mark issuer-open':'Mark issuer-closed'}</button>
+            </div>
             <button class="refresh-observation tracker-button" data-id="${card.id}">Record current values as observed today</button>
             <div class="mt-2 flex items-center gap-2">
               <span class="text-xs text-gray-500 dark:text-gray-400">Quick pay:</span>
@@ -1508,7 +1537,14 @@ function downloadFile(name, type, data) {
   a.click();
   URL.revokeObjectURL(url);
 }
-function exportData(format = "csv") {
+async function exportData(format = "csv") {
+  if(!tracking||!cryptoKey){showModal('Locked','Sign in and unlock before exporting.');return;}
+  if(format==='json'||format==='history'){
+    try{const backup=await makeBackup(tracking,cloudCards.filter(c=>!c.deletedAt));
+      downloadFile(format==='json'?'debt-tracker-backup.json':'debt-tracker-history.csv',format==='json'?'application/json':'text/csv',format==='json'?JSON.stringify(backup,null,2):historyCSV(backup.accounts));
+      toast('Downloaded backup contains decrypted personal financial data. Store it privately.');
+    }catch(error){showModal('Export unavailable',error.message);}return;
+  }
   const rows = window.__latestCards.map((c) => ({
     id: c.id,
     name: c.name,
@@ -1516,25 +1552,9 @@ function exportData(format = "csv") {
     apr: +c.apr || 0,
     creditLimit: +c.creditLimit || 0,
   }));
-  if (format === "json") {
-    downloadFile(
-      "debt-tracker.json",
-      "application/json",
-      JSON.stringify(rows, null, 2)
-    );
-  } else {
-    const header = "id,name,balance,apr,creditLimit";
-    const csv = [
-      header,
-      ...rows.map(
-        (r) =>
-          `${r.id},"${(r.name || "").replace(/"/g, '""')}",${r.balance},${
-            r.apr
-          },${r.creditLimit}`
-      ),
-    ].join("\n");
-    downloadFile("debt-tracker.csv", "text/csv", csv);
-  }
+  const header=['id','name','balance','apr','creditLimit'];
+  downloadFile('debt-tracker.csv','text/csv',[header,...rows.map(row=>header.map(key=>row[key]))].map(row=>row.map(csvCell).join(',')).join('\r\n'));
+
 }
 window.exportData = exportData;
 
@@ -1652,7 +1672,16 @@ importCsvInput?.addEventListener("change", async () => {
     return;
   }
 
+  if(file.size>10*1024*1024){showModal('Import failed','Choose a backup smaller than 10 MB.');return;}
   const text = await file.text();
+  try{const raw=JSON.parse(text);if(raw?.format===BACKUP_FORMAT){
+    const backup=validateBackup(raw);const {dialog,body}=trackingDialog('Review backup restore');
+    body.append(uiElement('p',`${backup.accounts.length} accounts and ${backup.accounts.reduce((sum,row)=>sum+row.events.length,0)} history records. Existing conflicting accounts are skipped unless you explicitly replace them.`));
+    for(const row of backup.accounts)body.append(uiElement('p',`${row.account.name}: ${fmtMoney(row.account.balance)}${cloudCards.some(c=>c.id===row.id)?' (already tracked)':''}`));
+    const label=uiElement('label');const replace=uiElement('input');replace.type='checkbox';label.append(replace,document.createTextNode(' Replace current snapshots for matching account IDs'));body.append(label);
+    body.append(uiButton('Restore reviewed backup',async()=>{try{const result=await restoreBackup(tracking,backup,cloudCards,{replace:replace.checked});dialog.close();await refreshTrackingView();toast(`Restore queued: ${result.restored} accounts, ${result.skipped} conflicts skipped.`);}catch(error){showModal('Restore failed',error.message);}}));return;
+  }}catch(error){if(text.includes('"format"')){showModal('Import failed',error.message);return;}}
+
   const isJson =
     /\.json$/i.test(file.name) ||
     file.type === "application/json" ||
@@ -1775,6 +1804,37 @@ function trackingFields(card){
   const result=makeObservation(card,{...fieldsOf(card),entryMethod:'direct',effectiveDate:localDate()});
   return result.account;
 }
+cardList?.addEventListener('click',async e=>{
+ const button=e.target.closest('[data-account-action]');if(!button)return;
+ const card=window.__latestCards.find(c=>c.id===button.dataset.id);if(!card||!tracking)return;
+ try{
+  if(button.dataset.accountAction==='history')await showHistory(tracking,card,event=>correctObservation(card.id,event));
+  else if(button.dataset.accountAction==='archive')await saveTracked(card,{...trackingFields(card),archived:!card.archived,updatedAt:new Date().toISOString()},'archive');
+  else if(button.dataset.accountAction==='status')await saveTracked(card,{...trackingFields(card),status:card.status==='closed'?'open':'closed',updatedAt:new Date().toISOString()},'status');
+ }catch(error){showModal('Not saved',error.message);}
+});
+function correctObservation(id,event){
+ const observation=event.details?.observation??event.after;
+ const {dialog,body}=trackingDialog('Correct an observation');
+ body.append(uiElement('p','This replaces an incorrect historical entry. It is not a new balance reduction.'));
+ const form=uiElement('form');
+ for(const [key,label,type,value] of [['name','Account name','text',observation.name],['entryMethod','Entry method','select',observation.entryMethod??'direct'],['creditLimit','Credit limit','number',observation.creditLimit],['availableCredit','Available credit','number',observation.availableCredit??''],['balance','Direct balance','number',observation.balance],['apr','APR','number',observation.apr],['effectiveDate','Observed on','date',observation.effectiveDate??localDate()],['note','Note','text',observation.note??'']]){
+  const wrap=uiElement('label',label);const input=uiElement(type==='select'?'select':'input');input.dataset.field=key;input.className='tracker-input';
+  if(type==='select')for(const method of ['availableCredit','direct']){const option=uiElement('option',method==='direct'?'Enter balance directly':'Calculate from available credit');option.value=method;input.append(option);}else{input.type=type;if(type==='number'){input.min='0';input.step='0.01';}}
+  input.value=String(value);wrap.append(input);form.append(wrap);
+ }
+ const confirm=uiElement('input');confirm.type='checkbox';confirm.checked=true;confirm.hidden=true;confirm.dataset.field='confirmObservation';form.append(confirm);
+ const save=uiButton('Save correction',null);save.type='submit';form.append(save);form.oninput=()=>refreshEntry(form);refreshEntry(form);
+ form.onsubmit=async e=>{e.preventDefault();save.disabled=true;try{
+  const current=window.__latestCards.find(c=>c.id===id);if(!current)throw new Error('Account is no longer available.');
+  const candidate=readEntry(form,observation).observation;
+  const isLatest=current.balanceObservedAt===observation.balanceObservedAt&&current.effectiveDate===observation.effectiveDate;
+  const after=isLatest?{...trackingFields(current),...candidate}:{...trackingFields(current),updatedAt:new Date().toISOString()};
+  await saveTracked(current,after,'correction',{correctionOf:event.id,observation:candidate});dialog.close();
+ }catch(error){showModal('Correction not saved',error.message);save.disabled=false;}};
+ body.append(form);
+}
+for(const id of ['show-archived','stale-only','stale-days'])document.getElementById(id)?.addEventListener('change',()=>renderCards(window.__latestCards));
 if(document.getElementById('observation-date'))document.getElementById('observation-date').value=localDate();
 refreshEntry(form);
 

@@ -54,6 +54,14 @@ service cloud.firestore {
               : !get(parentPath()).data.purging && request.resource.data.previous == get(parentPath()).data.revision));
           allow delete: if owner(uid) && get(parentPath()).data.purging == true;
         }
+        match /restored/{revision} {
+          function parent() { return get(/databases/$(database)/documents/artifacts/$(project)/users/$(uid)/cards/$(id)).data; }
+          allow read: if owner(uid);
+          allow create: if owner(uid) && event(request.resource.data)
+            && request.resource.data.revision == revision && request.resource.data.previous == 'backup'
+            && parent().v == 2 && !parent().purging;
+          allow delete: if owner(uid) && parent().purging;
+        }
       }
       match /meta/crypto {
         allow read: if owner(uid);

@@ -6,17 +6,19 @@ const APP_SHELL = [
   "./index.html",
   "./app.js",
   "./styles.css",
-  "./src/money.mjs",
-  "./src/account-model.mjs",
-  "./src/account-crypto.mjs",
-  "./src/session-scope.mjs",
-  "./src/tracking-store.mjs",
-  "./src/outbox.mjs",
-  "./src/firestore-adapter.mjs",
-  "./src/observations.mjs",
-
   "./manifest.webmanifest",
   "./icon.svg",
+  "./src/account-crypto.mjs",
+  "./src/account-model.mjs",
+  "./src/account-tools.mjs",
+  "./src/backup.mjs",
+  "./src/firestore-adapter.mjs",
+  "./src/history.mjs",
+  "./src/money.mjs",
+  "./src/observations.mjs",
+  "./src/outbox.mjs",
+  "./src/session-scope.mjs",
+  "./src/tracking-store.mjs",
 ];
 
 self.addEventListener("install", (event) => {
