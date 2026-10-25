@@ -1,3 +1,22 @@
+## 2026-10-25 - Payoff Plan, navigation, and custom utilization KPIs
+
+- Split the unlocked app into Accounts, Payoff Plan, and Progress. Moved existing
+  import/export controls into Settings & data; kept legacy section links working.
+- Added Avalanche/Snowball comparisons for a shared monthly budget or a target
+  payoff duration, optional planned baseline payments, interest and total cost,
+  payoff order, projected graph, and accessible monthly table.
+- Uses cent-based monthly calculations with explicit fixed-APR/no-new-purchase
+  assumptions. Rejects mixed/unknown APR and deferred-interest portfolios. Deadline
+  mode labels each strategy's independently estimated budget.
+- Kept the transfer optimizer available in a collapsed accordion with a recorded
+  promotion badge, without inferring transfer eligibility.
+- Every saved utilization threshold now creates an overall payment-target KPI.
+  Per-account targets remain available. Save targets has a normal button height.
+- Planning is read-only, in-memory, and cleared on logout. Browser coverage checks
+  safe text rendering, no financial writes, navigation, private-state clearing,
+  target persistence, and dark/mobile layouts. Passed 68 unit tests and four
+  synthetic browser suites. No production debug output added. Cache v17.
+
 ## 2026-10-25 - Passphrase form metadata and Rocket Loader exclusion
 
 - Corrected the misspelled data-cf-async attribute to Cloudflare's documented
