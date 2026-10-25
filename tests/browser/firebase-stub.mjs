@@ -2,7 +2,7 @@
 export const app = `export const initializeApp=config=>({config});`;
 export const auth = `
 let callback;const user={uid:'synthetic-owner',displayName:'Synthetic User'};
-export const getAuth=()=>({});
+export const getAuth=()=>({currentUser:{...user,getIdToken:async()=> 'synthetic-token'}});
 export const onAuthStateChanged=(_auth,fn)=>{callback=fn;queueMicrotask(()=>fn(user));};
 export class GoogleAuthProvider {setCustomParameters(){}}
 export const signInWithPopup=async()=>{callback(user);};
@@ -14,6 +14,7 @@ export const firestore = `
 const docs=globalThis.__syntheticDocs=new Map(JSON.parse(sessionStorage.getItem("synthetic-cloud")??"[]"));const listeners=[];
 const ref=(path)=>({path});
 export const getFirestore=()=>({});
+export const initializeFirestore=()=>({});
 export const enableIndexedDbPersistence=async()=>{};
 export const collection=(_db,...parts)=>ref(parts.join('/'));
 export const doc=(db,...parts)=>ref(parts.length?parts.join('/'):db.path+'/'+crypto.randomUUID());
@@ -21,7 +22,7 @@ const snapshot=(path)=>({id:path.split('/').at(-1),ref:ref(path),exists:()=>docs
 function emit(){sessionStorage.setItem("synthetic-cloud",JSON.stringify([...docs]));for(const listener of listeners){if(listener.active)queueMicrotask(()=>listener.fn({docs:[...docs.keys()].filter(path=>path.startsWith(listener.path+'/')&&path.split('/').length===listener.path.split('/').length+1).map(snapshot),metadata:{fromCache:false}}));}}
 globalThis.__syntheticEmit=emit;
 export const getDoc=async reference=>snapshot(reference.path);
-export const getDocFromCache=getDoc;
+export const getDocFromCache=async reference=>{if(globalThis.__syntheticCacheMiss)throw new Error('Cache unavailable');return snapshot(reference.path);};
 export const getDocFromServer=async reference=>{
  if(globalThis.__syntheticMetaHangs&&reference.path.endsWith('/meta/crypto'))return new Promise(()=>{});
  if(globalThis.__syntheticMetaDenied&&reference.path.endsWith('/meta/crypto')){const error=new Error('Permission denied');error.code='permission-denied';throw error;}

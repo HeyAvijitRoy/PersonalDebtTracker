@@ -12,6 +12,12 @@ Legend: ✅ shipped to `main` (live) · 🚧 on a branch, not yet merged ·
 
 ### Passphrase startup recovery - feature branch (local only)
 
+- After a confirmed SDK metadata timeout, added an authenticated HTTPS fallback
+  and proxy-compatible long polling. The fallback retains Firebase owner rules
+  and caches only salt/encrypted verifier, never passphrases, keys, or ID tokens.
+- Verified direct fallback with stalled SDK/cache reads in the startup browser
+  suite and real signed-out SDK initialization. Service-worker cache is now v9.
+
 - Returning users can load an existing cached salt/verifier without waiting on
   a stalled server request. Server-only confirmation is required for new setup.
 - Added a bounded metadata wait, a visible loading/error state, and Retry, plus

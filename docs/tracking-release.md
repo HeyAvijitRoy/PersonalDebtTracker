@@ -78,7 +78,7 @@ Node 22. Patched transitive development dependencies are pinned through npm
 overrides and exercised by the build/emulator/browser checks. No npm packages
 are included in the deployed static artifact.
 
-Verified locally: 47 unit/crypto/model/session/server tests; nine emulator rule
+Verified locally: 51 unit/crypto/model/session/server tests; nine emulator rule
 tests; three synthetic browser suites; dependency audit with zero reported
 vulnerabilities. Checks include owner/anonymous/foreign-user
 rules; paired/stale writes; immutable/restored history; multi-batch purge; calculated
@@ -100,7 +100,7 @@ credential folders, test fixtures, or backups as a general directory server woul
    block old-client writes while preserving legacy reads; keep this maintenance
    gap short. Test owner and foreign-user access against the actual deployed rules.
 3. Publish this branch's tested application assets through the normal Pages
-   workflow. Service-worker cache v8 replaces older asset caches.
+   workflow. Service-worker cache v9 replaces older asset caches.
 4. Verify real sign-in/unlock, one account update with its encrypted event,
    offline/reconnect, backup/restore, Progress, and sign-out on the live deployment.
 5. Keep a schema-compatible client for rollback. Do not restore the old four-field
@@ -109,3 +109,18 @@ credential folders, test fixtures, or backups as a general directory server woul
 
 No push, merge, rules deployment, or public publication was performed as part of
 the local implementation.
+
+## Encryption-settings connection recovery
+
+Metadata loading uses the SDK cache or an owner-scoped cache containing only the
+salt and encrypted verifier. If a server SDK read stalls, an authenticated HTTPS
+document read starts after 1.5 seconds. Firebase ID tokens are sent only in the
+Authorization header and are never persisted in this cache or placed in URLs.
+The fallback does not use an admin/service-account credential: normal owner-access
+rules still apply. See [Firebase REST authentication](https://firebase.google.com/docs/firestore/use-rest-api).
+
+The SDK uses forced long polling to avoid indefinitely buffered streaming
+responses on some proxy/security-software configurations, as described in
+[Firebase transport settings](https://firebase.google.com/docs/reference/js/firestore.firestoresettings).
+Timeouts, permission errors, and sign-in refresh failures do not trigger a new
+passphrase setup or overwrite existing encryption settings.

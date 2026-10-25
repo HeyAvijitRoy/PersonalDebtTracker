@@ -16,6 +16,11 @@ try{
  await page.reload();await page.locator('#lock-pass').waitFor({timeout:2500});
  assert.equal(await page.locator('#lock-setup').isVisible(),false);
  await page.locator('#lock-pass').fill('synthetic-passphrase');await page.locator('#lock-unlock-btn').click();await page.locator('#main-app:not(.hidden)').waitFor();
+ // When SDK cache and WebChannel reads are unavailable, the same signed-in
+ // identity can retrieve metadata through the authenticated single-read API.
+ await page.evaluate(()=>localStorage.removeItem('pdt-lock-metadata:synthetic-project:synthetic-owner'));
+ await page.addInitScript(()=>{globalThis.__syntheticCacheMiss=true;globalThis.__syntheticRestMetadataEnabled=true;});
+ await page.reload();await page.locator('#lock-pass').waitFor({timeout:5000});assert.equal(await page.locator('#lock-setup').isVisible(),false);
  assert.deepEqual(errors,[]);await context.close();
- console.log('Startup browser passed: bounded metadata wait, safe retry, server-confirmed setup, and cache-first passphrase reload.');
+ console.log('Startup browser passed: bounded wait, safe retry, cached unlock, and authenticated metadata fallback when SDK reads stall.');
 }finally{await browser.close();}

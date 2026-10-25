@@ -13,6 +13,7 @@ import { scenarioCost,reminders } from "./src/planning.mjs";
 import { ProgressPage } from "./src/progress-ui.mjs";
 import { preferences } from "./src/preferences.mjs";
 import { loadLockMetadata } from "./src/lock-gate.mjs";
+import { fallbackAfter,fetchCryptoMetadata,metadataCache } from "./src/metadata-transport.mjs";
 const sessionScope = new SessionScope();
 let tracking=null,cloudCards=[],pendingRows=[],viewSequence=0;
 let cleanupRunning=false;
@@ -217,7 +218,7 @@ import {
   signOut,
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
 import {
-  getFirestore,
+  initializeFirestore,
   collection,
   onSnapshot,
   doc,
@@ -290,8 +291,16 @@ function metaDocRef(uid) {
 }
 
 async function loadCryptoMeta(uid) {
+  const generation=sessionScope.generation;
+  let storage;try{storage=localStorage;}catch{}
+  const cache=metadataCache(storage,`${appId}:${uid}`);
   const read=async getter=>{const snap=await getter(metaDocRef(uid));return snap.exists()?snap.data():null;};
-  return loadLockMetadata({cached:()=>read(getDocFromCache),server:()=>read(getDocFromServer)});
+  const metadata=await loadLockMetadata({
+    cached:async()=>cache.read()??await read(getDocFromCache),
+    server:()=>fallbackAfter(read(getDocFromServer),()=>fetchCryptoMetadata({projectId:appId,uid,user:auth.currentUser})),
+  });
+  if(sessionScope.current(generation)&&userId===uid)cache.write(metadata);
+  return metadata;
 }
 
 // First-time setup: generate a salt, derive the key, store salt + a verifier
@@ -581,7 +590,9 @@ function initFirebase() {
   try {
     const app = initializeApp(firebaseConfig);
     auth = getAuth(app);
-    db = getFirestore(app);
+    // Close each network response promptly for proxies/antivirus that buffer
+    // streaming WebChannel requests. No authentication or rules are bypassed.
+    db = initializeFirestore(app,{experimentalForceLongPolling:true});
 
     // Offline-first Firestore (ignore multi-tab error)
     enableIndexedDbPersistence(db).catch(() => {});
