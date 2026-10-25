@@ -10,9 +10,11 @@ import { showHistory,makeBackup,restoreBackup,historyCSV,trackingDialog,element 
 import { BACKUP_FORMAT,validateBackup,csvCell } from "./src/backup.mjs";
 import { showPlanning,showPayment,showTransfer } from "./src/planning-ui.mjs";
 import { scenarioCost,reminders } from "./src/planning.mjs";
+import { ProgressPage } from "./src/progress-ui.mjs";
 const sessionScope = new SessionScope();
 let tracking=null,cloudCards=[],pendingRows=[],viewSequence=0;
 let cleanupRunning=false;
+let progressPage=null;
 
 // ====== UI ELEMENTS ======
 const form = document.getElementById("debt-form");
@@ -496,6 +498,7 @@ lockUnlockForm?.addEventListener("submit", async (e) => {
 });
 
 function clearUnlockedState() {
+  progressPage?.clear();
   tracking?.close();tracking=null;cloudCards=[];pendingRows=[];viewSequence++;
   document.querySelectorAll(".tracker-undo").forEach(element=>element.remove());
   document.querySelectorAll(".tracking-dialog").forEach(dialog=>{dialog.close();dialog.remove();});
@@ -1059,6 +1062,7 @@ function renderAll(cards) {
   renderExpensive(cards);
   renderFicoHints(cards);
   renderReminders(cards);
+  progressPage?.refresh();
 }
 
 function renderCards(cards) {
@@ -2237,4 +2241,5 @@ const footerYear = document.getElementById("footer-year");
 if (footerYear) footerYear.textContent = new Date().getFullYear();
 
 // ====== BOOT ======
+progressPage=new ProgressPage({getStore:()=>tracking,getCards:()=>cloudCards});
 initFirebase();

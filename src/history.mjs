@@ -19,6 +19,6 @@ export function observations(events) {
   const superseded=new Set(events.filter(e=>e.type==="correction").map(e=>e.details?.correctionOf).filter(Boolean));
   return events.filter(event=>!superseded.has(event.id)&&!["delete","restore","purge","archive","restore-history"].includes(event.type))
     .map(event=>({event,account:event.details?.observation??event.after}))
-    .filter(({event,account})=>account.balanceObservedAt&&account.effectiveDate&&(event.details?.observation||!event.before||event.before.balanceObservedAt!==account.balanceObservedAt))
+    .filter(({event,account})=>account.balanceObservedAt&&account.effectiveDate&&(event.details?.observation||event.type==='observation'||!event.before||event.before.balanceObservedAt!==account.balanceObservedAt||['balance','creditLimit','entryMethod','availableCredit'].some(field=>event.before[field]!==account[field])))
     .sort((a,b)=>a.account.effectiveDate.localeCompare(b.account.effectiveDate)||a.event.recordedAt.localeCompare(b.event.recordedAt)||a.event.id.localeCompare(b.event.id));
 }

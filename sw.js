@@ -19,6 +19,8 @@ const APP_SHELL = [
   "./src/outbox.mjs",
   "./src/planning-ui.mjs",
   "./src/planning.mjs",
+  "./src/progress-ui.mjs",
+  "./src/progress.mjs",
   "./src/session-scope.mjs",
   "./src/tracking-store.mjs",
 ];

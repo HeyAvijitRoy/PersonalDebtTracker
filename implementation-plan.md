@@ -19,7 +19,11 @@ rule tests cover live and restored history. Stage 5 adds manual statement/promot
 references, conditional interest guidance, optional statement-linked payment
 records/status updates, atomic two-account transfer records, provisional adjustment
 labels, and explicit interest-scenario opt-in/coverage. No minimum-payment fields
-or exact interest-start inference are included. Stages 6-7 remain pending. No live cloud rules or
+or exact interest-start inference are included. Stage 6 adds the dedicated Progress
+page with date/account selectors, comparable balance KPIs, dated balance graphs,
+accessible tables, account comparison bars, aligned utilization/limit graphs, and
+derived milestones. Missing/one-point/basis-change history is handled explicitly.
+Stage 7 verification and release preparation remain. No live cloud rules or
 deployment have been changed.
 
 ## Goal and scope

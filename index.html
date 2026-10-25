@@ -139,6 +139,7 @@
         </div>
 
         <nav aria-label="Primary" class="flex flex-wrap gap-2 text-sm">
+          <a href="#progress" class="nav-link tracker-button">Progress</a>
           <a
             href="#accounts"
             class="nav-link px-3 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
@@ -363,6 +364,7 @@
       <!-- Main App UI -->
       <main id="main-app" class="hidden">
         <div id="sync-status" class="tracker-status" role="status" aria-live="polite"></div>
+        <div id="dashboard-view">
         <!-- KPI Tiles -->
         <section class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-3">
           <div
@@ -928,6 +930,20 @@
             <path d="M12 5v14M5 12h14" />
           </svg>
         </button>
+        </div>
+        <section id="progress-view" class="hidden" aria-labelledby="progress-title">
+          <h2 id="progress-title" class="text-xl font-semibold">Balance progress</h2>
+          <p class="tracker-help">Recorded estimated balances over time. These are balance reductions and increases, not a total of payments made. Missing history is never shown as zero.</p>
+          <div class="tracker-fields">
+            <label>Account<select id="progress-account" class="tracker-input"></select></label>
+            <label>Period<select id="progress-period" class="tracker-input"><option value="since">Since comparable tracking began</option><option value="month">This month</option><option value="30">Last 30 days</option><option value="custom">Custom dates</option></select></label>
+            <label>Custom start<input id="progress-from" class="tracker-input" type="date" /></label>
+            <label>Custom end<input id="progress-through" class="tracker-input" type="date" /></label>
+          </div>
+          <button id="progress-refresh" class="tracker-button" type="button">Refresh history</button>
+          <p class="tracker-help">Current tracked balances are compared like-for-like. Different update dates, missing history, and entry-method changes affect coverage. Permanent deletion removes an account's history from future comparisons.</p>
+          <div id="progress-results" aria-live="polite"></div>
+        </section>
       </main>
     </div>
 

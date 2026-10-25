@@ -23,4 +23,13 @@
   .tracking-dialog label { @apply block my-2 text-sm; }
   .tracking-dialog > button { @apply mt-4; }
   .tracker-history-row { @apply border-t border-gray-200 dark:border-gray-700 py-3 text-sm; }
+  .tracker-kpi { @apply p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 my-3; }
+  .tracker-chart { @apply my-5 p-3 rounded-lg border border-gray-200 dark:border-gray-700; }
+  .tracker-chart svg { display: block; width: 100%; height: auto; }
+  .tracker-chart circle:focus { stroke: currentColor; stroke-width: 3; outline: none; }
+  .tracker-table { @apply w-full text-sm text-left; }
+  .tracker-table th, .tracker-table td { @apply p-2 border-b border-gray-200 dark:border-gray-700; overflow-wrap: anywhere; }
+  .tracker-bar { @apply rounded-full h-3 bg-gray-200 dark:bg-gray-700 mt-1; }
+  .tracker-bar > div { @apply rounded-full h-3 bg-sky-600; }
+  .tracker-milestone { @apply my-2 p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-200; }
 }

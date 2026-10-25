@@ -51,6 +51,14 @@ try {
  await page.locator('dialog').getByRole('button',{name:'Close',exact:true}).click();
  const downloaded=page.waitForEvent('download');await page.locator('button[onclick="exportData(\'json\')"]').first().click();
  const backup=JSON.parse(await readFile(await (await downloaded).path(),'utf8'));assert.equal(backup.accounts.length,1);assert.ok(backup.accounts[0].events.length>=4);
+ await page.getByRole('link',{name:'Progress',exact:true}).click();
+ await page.locator('#progress-results').getByText('Reduced by $300.00 (16.7%)',{exact:true}).waitFor();
+ assert.ok(await page.locator('#progress-results svg').count()>=1);
+ await page.locator('#progress-results summary').click();assert.ok(await page.locator('#progress-results tbody tr').count()>=2);
+ await mkdir('test-results',{recursive:true});await page.screenshot({path:'test-results/progress-desktop.png',fullPage:true});
+ await page.setViewportSize({width:390,height:844});await page.screenshot({path:'test-results/progress-mobile.png',fullPage:true});
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Progress mobile horizontal overflow');
+ await page.getByRole('link',{name:'Accounts',exact:true}).click();await page.setViewportSize({width:1280,height:900});
  await mkdir("test-results",{recursive:true});await page.screenshot({path:"test-results/accounts-desktop.png",fullPage:true});
  await page.setViewportSize({width:390,height:844});await page.screenshot({path:"test-results/accounts-mobile.png",fullPage:true});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,"Mobile horizontal overflow");
