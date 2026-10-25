@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 export async function createRuntimeServer({port=5173,config=true}={}){
  const root=path.resolve(fileURLToPath(new URL('..',import.meta.url)));
- const assets=new Set(['index.html','app.js','styles.css','sw.js','manifest.webmanifest','icon.svg',...(config?['env.js']:[]),...(await readdir(path.join(root,'src'))).filter(name=>name.endsWith('.mjs')).map(name=>'src/'+name)]);
+ const assets=new Set(['index.html','app.js','styles.css','sw.js','manifest.webmanifest','icon.svg','favicon.svg','favicon.ico','apple-touch-icon.png',...(config?['env.js']:[]),...(await readdir(path.join(root,'src'))).filter(name=>name.endsWith('.mjs')).map(name=>'src/'+name)]);
  const server=http.createServer(async(request,response)=>{
   response.setHeader('X-Content-Type-Options','nosniff');response.setHeader('Cache-Control','no-store');
   let host;try{host=new URL('http://'+request.headers.host).hostname;}catch{response.writeHead(400);response.end('Invalid host');return;}
@@ -14,7 +14,7 @@ export async function createRuntimeServer({port=5173,config=true}={}){
   const filename=pathname==='/'?'index.html':pathname.slice(1);
   const runtimeModule=/^src\/[A-Za-z0-9_-]+\.mjs$/.test(filename);
   if(!assets.has(filename)&&!runtimeModule){response.writeHead(404);response.end('Not found');return;}
-  try{const data=await readFile(path.join(root,filename));response.setHeader('Content-Type',filename.endsWith('.html')?'text/html; charset=utf-8':filename.endsWith('.css')?'text/css':filename.endsWith('.svg')?'image/svg+xml':filename.endsWith('.webmanifest')?'application/manifest+json':'text/javascript; charset=utf-8');response.end(request.method==='HEAD'?undefined:data);}catch{response.writeHead(404);response.end('Not found');}
+  try{const data=await readFile(path.join(root,filename));response.setHeader('Content-Type',filename.endsWith('.html')?'text/html; charset=utf-8':filename.endsWith('.css')?'text/css':filename.endsWith('.svg')?'image/svg+xml':filename.endsWith('.ico')?'image/x-icon':filename.endsWith('.png')?'image/png':filename.endsWith('.webmanifest')?'application/manifest+json':'text/javascript; charset=utf-8');response.end(request.method==='HEAD'?undefined:data);}catch{response.writeHead(404);response.end('Not found');}
  });
  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});return server;
 }

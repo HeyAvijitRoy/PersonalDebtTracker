@@ -100,7 +100,7 @@ credential folders, test fixtures, or backups as a general directory server woul
    block old-client writes while preserving legacy reads; keep this maintenance
    gap short. Test owner and foreign-user access against the actual deployed rules.
 3. Publish this branch's tested application assets through the normal Pages
-   workflow. Service-worker cache v14 replaces older asset caches.
+   workflow. Service-worker cache v15 replaces older asset caches.
 4. Verify real sign-in/unlock, one account update with its encrypted event,
    offline/reconnect, backup/restore, Progress, and sign-out on the live deployment.
 5. Keep a schema-compatible client for rollback. Do not restore the old four-field
@@ -220,3 +220,22 @@ includes this production-specific limitation. Emulator checks also force a real
 concurrent update and confirm the stale attempt cannot overwrite it. Other console
 warnings (browser extensions, preload credentials, favicon and deprecation notices)
 are separate from the failed sync request. Real-user confirmation remains necessary.
+
+
+## App icon and freshness visibility (2026-10-25)
+
+Favicon SVG, 16/32/48px ICO, Apple touch PNG and the PWA icon share the same
+credit-card/paydown mark. All are explicit public runtime assets in the local
+server, Pages artifact and offline cache.
+
+Outdated, undated and provisional account values use amber card borders, a text
+badge, a highlighted observation block and an Update now action. Unsynced drafts
+have a separate blue Pending sync badge. Current observations clear the freshness
+warning; APR-only changes do not falsely refresh balance observations. The filter
+and card styling share one predicate. No balance/date is altered by rendering.
+
+Application-owned console prints have been removed; validation and failures stay
+visible in the UI. Firestore initializes through persistentLocalCache with the
+multi-tab manager instead of the deprecated persistence initializer. This does
+not change encrypted outbox format, keys or server rules. Extension-injected and
+Cloudflare/browser messages remain outside application logging control.

@@ -246,15 +246,13 @@ import {
   getDocFromCache,
   getDocFromServer,
   runTransaction,
-  enableIndexedDbPersistence,
+  persistentLocalCache,
+  persistentMultipleTabManager,
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
 
 // Load config from env.js
 const firebaseConfig = window.__FIREBASE_CONFIG;
 if (!firebaseConfig || !firebaseConfig.apiKey) {
-  console.error(
-    "[Config] Missing Firebase config. Ensure env.js loads BEFORE app.js."
-  );
   authStatus &&
     (authStatus.textContent =
       "Config missing: ensure env.js loads before app.js.");
@@ -267,7 +265,6 @@ if (!firebaseConfig || !firebaseConfig.apiKey) {
   document.body.prepend(warn);
   throw new Error("Missing Firebase config");
 }
-console.log("[Auth] Config OK for project:", firebaseConfig.projectId);
 const appId = firebaseConfig.projectId;
 
 // ====== CLIENT-SIDE ENCRYPTION (Lock Mode) ======
@@ -541,7 +538,6 @@ lockSetupForm?.addEventListener("submit", async (e) => {
     toast("Lock Mode enabled");
     enterAppAfterUnlock();
   } catch (err) {
-    console.error("[Crypto] Setup failed:", err);
     showErr(err.message?.startsWith('Encryption settings already exist')?err.message:"Could not enable Lock Mode. Please try again.");
     btn.disabled = false;
     btn.textContent = prev;
@@ -574,7 +570,6 @@ lockUnlockForm?.addEventListener("submit", async (e) => {
     document.getElementById("lock-pass").value = "";
     enterAppAfterUnlock();
   } catch (err) {
-    console.error("[Crypto] Unlock failed:", err);
     showErr("Could not unlock. Please try again.");
     btn.disabled = false;
     btn.textContent = prev;
@@ -629,23 +624,14 @@ function initFirebase() {
     auth = getAuth(app);
     // Close each network response promptly for proxies/antivirus that buffer
     // streaming WebChannel requests. No authentication or rules are bypassed.
-    db = initializeFirestore(app,{experimentalForceLongPolling:true});
-
-    // Offline-first Firestore (ignore multi-tab error)
-    enableIndexedDbPersistence(db).catch(() => {});
+    db = initializeFirestore(app,{experimentalForceLongPolling:true,localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})});
 
     // Complete redirect sign-in if we came back from Google
     getRedirectResult(auth)
-      .then((res) => {
-        if (res?.user)
-          console.log("[Auth] Redirect sign-in completed.");
-      })
       .catch((err) => {
-        console.warn("[Auth] Redirect error:", err?.code, err?.message);
-        if (authStatus && err?.code === "auth/unauthorized-domain") {
-          authStatus.textContent =
-            "Add localhost / 127.0.0.1 to Authorized domains in Firebase Auth.";
-        }
+        if(authStatus)authStatus.textContent=err?.code==='auth/unauthorized-domain'?
+          'This site is not authorized for sign-in. Check the Firebase authorized domains.':
+          'Sign-in did not complete. Please try again.';
       });
 
     onAuthStateChanged(auth, async (user) => {
@@ -675,7 +661,6 @@ function initFirebase() {
       }
     });
   } catch (err) {
-    console.error("[Init] Firebase init failed:", err);
     authStatus &&
       (authStatus.textContent =
         "Failed to initialize Firebase. Check your configuration.");
@@ -1184,7 +1169,8 @@ function renderCards(cards) {
   const showArchived=document.getElementById('show-archived')?.checked;
   const staleOnly=document.getElementById('stale-only')?.checked;
   const staleDays=Number(document.getElementById('stale-days')?.value)||7;
-  const visible=cards.filter(card=>(showArchived||!card.archived)&&(!staleOnly||!card.effectiveDate||(Date.now()-Date.parse(card.effectiveDate+'T00:00:00'))/86400000>=staleDays));
+  const needsUpdate=card=>card.provisional||!card.effectiveDate||(Date.now()-Date.parse(card.effectiveDate+'T00:00:00'))/86400000>=staleDays;
+  const visible=cards.filter(card=>(showArchived||!card.archived)&&(!staleOnly||needsUpdate(card)));
   const query = searchQuery.trim().toLowerCase();
   const filtered = query
     ? visible.filter((c) => (c.name || "").toLowerCase().includes(query))
@@ -1213,11 +1199,14 @@ function renderCards(cards) {
         ? "bg-amber-500"
         : "bg-rose-500";
     const isEditing = editingId === card.id;
+    const requiresUpdate=needsUpdate(card);
+    const updateReason=card.provisional?'Provisional balance. Check the current values with your issuer.':!card.effectiveDate?'Observation date missing. Check your issuer and record the current values.':`Your ${staleDays}-day update interval has passed. Check your issuer for the latest balance and available credit.`;
 
     const el = document.createElement("div");
     el.className =
       "debt-card group bg-white dark:bg-gray-900 p-4 rounded-lg shadow-sm border border-gray-100 dark:border-gray-800 hover:shadow-md transition-shadow";
 
+    el.classList.toggle('account-needs-update',Boolean(requiresUpdate));
     if (!isEditing) {
       el.innerHTML = `
         <div class="flex items-start justify-between">
@@ -1225,7 +1214,10 @@ function renderCards(cards) {
             <h3 class="name-fit text-base font-semibold text-gray-900 dark:text-gray-100" title="${escapeHtml(card.name)}">
               ${escapeHtml(card.name)}
             </h3>
-            <div class="mt-1">${creditLimit>0?riskBadge(utilization):'<span class="tracker-help">Utilization unavailable: no positive limit</span>'}</div>
+            <div class="account-badges">${creditLimit>0?riskBadge(utilization):'<span class="tracker-help">Utilization unavailable: no positive limit</span>'}
+              ${requiresUpdate?'<span class="account-update-badge">Needs an update</span>':''}
+              ${card._pending?'<span class="account-pending-badge">Pending sync</span>':''}
+            </div>
             <div class="mt-1 grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-gray-600 dark:text-gray-400">
               <p>Balance: <span class="font-semibold text-gray-900 dark:text-gray-100">${fmtMoney(
                 balance
@@ -1246,8 +1238,12 @@ function renderCards(cards) {
               <p>Monthly cost scenario: <span class="font-semibold text-gray-900 dark:text-gray-100">${monthlyInt===null?'Not included':fmtMoney(monthlyInt)}</span></p>
             </div>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Hypothetical monthly cost per $100 at entered APR: ${card.rateBasis&&card.rateBasis!=='single'?'Unavailable':fmtMoney(interestPer100(apr))}</p>
-            <p class="tracker-help">${card.entryMethod==='availableCredit'?'Estimated from available credit: '+fmtMoney(card.availableCredit):'Direct balance entry'} | ${card.effectiveDate?(card.provisional?'Provisional as of ':'Observed ')+escapeHtml(card.effectiveDate):'Observation date not recorded'}${card._pending?' | Pending sync':''}${card.provisional?' | Refresh issuer inputs to reconcile.':''}</p>
-            <p class="tracker-help">${card.archived?'Archived (still included in totals). ':''}${card.status==='closed'?'Issuer-closed; outstanding balance remains tracked. ':''}${!card.effectiveDate||(Date.now()-Date.parse(card.effectiveDate+'T00:00:00'))/86400000>=Number(document.getElementById('stale-days')?.value||7)?'Balance needs an update.':''}</p>
+            <p class="tracker-help">${card.entryMethod==='availableCredit'?'Estimated from available credit: '+fmtMoney(card.availableCredit):'Direct balance entry'}</p>
+            <div class="account-freshness ${requiresUpdate?'account-freshness-warning':''}">
+              <p class="${requiresUpdate?'font-semibold':''}">${card.effectiveDate?(card.provisional?'Provisional as of ':'Observed ')+escapeHtml(card.effectiveDate):'Observation date not recorded'}</p>
+              ${requiresUpdate?`<p class="mt-1">${escapeHtml(updateReason)}</p>`:''}
+            </div>
+            ${card.archived||card.status==='closed'?`<p class="tracker-help">${card.archived?'Archived (still included in totals). ':''}${card.status==='closed'?'Issuer-closed; outstanding balance remains tracked.':''}</p>`:''}
             <div class="mt-2 flex items-center gap-2">
               <span class="text-xs text-gray-500 dark:text-gray-400">Quick pay:</span>
               <button
@@ -1283,7 +1279,7 @@ function renderCards(cards) {
           }
           ${renderCardFicoHint(card)}
             <div class="account-toolbar">
-              <button type="button" class="inline-edit-btn account-update" data-id="${card.id}">Update balance</button>
+              <button type="button" class="inline-edit-btn account-update ${requiresUpdate?'account-update-needed':''}" data-id="${card.id}">${requiresUpdate?'Update now':'Update balance'}</button>
               <button type="button" class="account-history" data-account-action="history" data-id="${card.id}">View history</button>
               <details class="account-menu">
                 <summary>Actions</summary>
@@ -1790,18 +1786,18 @@ importCsvInput?.addEventListener("change", async () => {
     db,
     `artifacts/${appId}/users/${userId}/cards`
   );
-  let imported = 0;
+  let imported = 0, failedImports = 0;
   for (const row of rows) {
     if(tracking!==importStore||!importStore.isActive())return;
     try {
       await saveTracked(null,makeObservation(null,{...row,entryMethod:'direct',effectiveDate:localDate()}).account,'import');
       imported++;
-    } catch (err) {
-      console.error("[Import] Row failed:", err);
+    } catch {
+      failedImports++;
     }
   }
 
-  const skipped = errors.length;
+  const skipped = errors.length + failedImports;
   toast(
     `Imported ${imported} account${imported === 1 ? "" : "s"}` +
       (skipped ? ` • ${skipped} skipped` : "")
@@ -1809,9 +1805,9 @@ importCsvInput?.addEventListener("change", async () => {
   if (skipped) {
     showModal(
       "Import finished with issues",
-      `Imported ${imported} account(s). Skipped ${skipped} invalid row(s):\n${errors
-        .slice(0, 8)
-        .join("\n")}`
+      `Imported ${imported} account(s). Skipped ${skipped} row(s).` +
+      (errors.length?'\nValidation issues:\n'+errors.slice(0,8).join('\n'):'') +
+      (failedImports?`\n${failedImports} row(s) could not be saved. Please try those rows again.`:'')
     );
   }
 });
@@ -2053,7 +2049,6 @@ googleSigninBtn?.addEventListener("click", async () => {
       }
     }
   } catch (err) {
-    console.error("[Auth] Sign-in failed:", err?.code, err?.message);
     authStatus &&
       (authStatus.textContent = `${err?.code || "auth/error"} — ${
         err?.message || "Sign-in failed."
@@ -2106,7 +2101,6 @@ signOutBtn?.addEventListener("click", async () => {
     form?.reset();
     applyFieldErrors({}, TOP_FORM_FIELD_MAP);
   } catch (err) {
-    console.error("[Auth] Sign-out failed:", err);
   }
 });
 

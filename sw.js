@@ -1,6 +1,6 @@
 // Bump this on every deploy that changes cached assets; the activate
 // handler purges any cache that doesn't match, so old shells can't linger.
-const CACHE_NAME = "debt-tracker-v14";
+const CACHE_NAME = "debt-tracker-v15";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -8,6 +8,9 @@ const APP_SHELL = [
   "./styles.css",
   "./manifest.webmanifest",
   "./icon.svg",
+  "./favicon.svg",
+  "./favicon.ico",
+  "./apple-touch-icon.png",
   "./src/account-crypto.mjs",
   "./src/account-model.mjs",
   "./src/account-tools.mjs",

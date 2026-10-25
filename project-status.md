@@ -1,3 +1,20 @@
+## 2026-10-25 - Favicon, visible update reminders, and quiet production output
+
+- Added a blue/indigo card-and-paydown icon as SVG, multi-resolution ICO and Apple
+  touch PNG; aligned the PWA icon and included assets in Pages, local serving and
+  offline caching. Explicit favicon links eliminate the missing favicon request.
+- Cards needing current issuer inputs now have an amber border, Needs an update
+  badge, highlighted observation date/reason and Update now button. Provisional
+  balances also need verification; pending sync uses a distinct blue badge.
+  The Needs an update filter uses the same condition as the card styling.
+- Removed application console prints. Errors remain in the UI, including failed
+  import counts. Switched to the supported persistentLocalCache multi-tab API to
+  avoid the deprecated persistence initializer warning. No logger overrides.
+- Verified icons load with correct MIME types and ICO sizes 16/32/48; 61 unit
+  checks and three browser suites passed, including stale-to-current styling and
+  existing offline/conflict/history flows. Visually reviewed the icon and dark
+  stale card. Cache v15. No account records or production rules were changed.
+
 ## 2026-10-25 - Correct browser REST authentication compatibility
 
 - Console evidence identified production 403s on BeginTransaction. Replaced that
