@@ -78,8 +78,8 @@ Node 22. Patched transitive development dependencies are pinned through npm
 overrides and exercised by the build/emulator/browser checks. No npm packages
 are included in the deployed static artifact.
 
-Verified locally: 41 unit/crypto/model/session/server tests; eight emulator rule
-tests; two synthetic browser suites; dependency audit with zero reported
+Verified locally: 47 unit/crypto/model/session/server tests; nine emulator rule
+tests; three synthetic browser suites; dependency audit with zero reported
 vulnerabilities. Checks include owner/anonymous/foreign-user
 rules; paired/stale writes; immutable/restored history; multi-batch purge; calculated
 entry/edit; offline reload/replay; conflict review; linked transfers/fees; backup
@@ -100,7 +100,7 @@ credential folders, test fixtures, or backups as a general directory server woul
    block old-client writes while preserving legacy reads; keep this maintenance
    gap short. Test owner and foreign-user access against the actual deployed rules.
 3. Publish this branch's tested application assets through the normal Pages
-   workflow. Service-worker cache v7 replaces older asset caches.
+   workflow. Service-worker cache v8 replaces older asset caches.
 4. Verify real sign-in/unlock, one account update with its encrypted event,
    offline/reconnect, backup/restore, Progress, and sign-out on the live deployment.
 5. Keep a schema-compatible client for rollback. Do not restore the old four-field

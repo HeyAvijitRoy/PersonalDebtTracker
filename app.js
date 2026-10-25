@@ -12,6 +12,7 @@ import { showPlanning,showPayment,showTransfer } from "./src/planning-ui.mjs";
 import { scenarioCost,reminders } from "./src/planning.mjs";
 import { ProgressPage } from "./src/progress-ui.mjs";
 import { preferences } from "./src/preferences.mjs";
+import { loadLockMetadata } from "./src/lock-gate.mjs";
 const sessionScope = new SessionScope();
 let tracking=null,cloudCards=[],pendingRows=[],viewSequence=0;
 let cleanupRunning=false;
@@ -220,8 +221,9 @@ import {
   collection,
   onSnapshot,
   doc,
-  getDoc,
-  setDoc,
+  getDocFromCache,
+  getDocFromServer,
+  runTransaction,
   enableIndexedDbPersistence,
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
 
@@ -288,8 +290,8 @@ function metaDocRef(uid) {
 }
 
 async function loadCryptoMeta(uid) {
-  const snap = await getDoc(metaDocRef(uid));
-  return snap.exists() ? snap.data() : null;
+  const read=async getter=>{const snap=await getter(metaDocRef(uid));return snap.exists()?snap.data():null;};
+  return loadLockMetadata({cached:()=>read(getDocFromCache),server:()=>read(getDocFromServer)});
 }
 
 // First-time setup: generate a salt, derive the key, store salt + a verifier
@@ -304,10 +306,16 @@ async function createCryptoMeta(uid, passphrase) {
     key,
     textEnc.encode(VERIFY_TOKEN)
   );
-  await setDoc(metaDocRef(uid), {
+  const metadata={
     v: 1,
     salt: toB64(saltBytes),
     verifier: { iv: toB64(iv), data: toB64(ct) },
+  };
+  await runTransaction(db,async transaction=>{
+    const reference=metaDocRef(uid),existing=await transaction.get(reference);
+    if(existing.exists())throw new Error('Encryption settings already exist. Reload to unlock using your existing passphrase.');
+    if(!sessionScope.current(generation)||userId!==uid)throw new Error('Session changed. Sign in again.');
+    transaction.set(reference,metadata);
   });
   if (!sessionScope.current(generation) || userId !== uid) throw new Error("Session changed. Sign in again.");
   cryptoKey = key;
@@ -336,6 +344,7 @@ async function unlockWithPassphrase(meta, passphrase) {
 
 // ====== LOCK MODE UI FLOW ======
 function showLockSetup() {
+  document.getElementById('lock-loading')?.classList.add('hidden');
   authSection?.classList.add("hidden");
   appLoading?.classList.add("hidden");
   mainApp?.classList.add("hidden");
@@ -346,6 +355,7 @@ function showLockSetup() {
 }
 
 function showLockUnlock() {
+  document.getElementById('lock-loading')?.classList.add('hidden');
   authSection?.classList.add("hidden");
   appLoading?.classList.add("hidden");
   mainApp?.classList.add("hidden");
@@ -354,6 +364,26 @@ function showLockUnlock() {
   lockSetup?.classList.add("hidden");
   document.getElementById("lock-pass")?.focus();
 }
+
+let lockRequest=0;
+async function loadLockScreen(uid,generation=sessionScope.generation){
+ const attempt=++lockRequest;
+ authSection?.classList.add('hidden');mainApp?.classList.add('hidden');appLoading?.classList.add('hidden');
+ lockSection?.classList.remove('hidden');lockSetup?.classList.add('hidden');lockUnlock?.classList.add('hidden');
+ document.getElementById('lock-loading')?.classList.remove('hidden');
+ const status=document.getElementById('lock-loading-status'),retry=document.getElementById('lock-retry');
+ if(status)status.textContent='Loading your encryption settings...';if(retry)retry.classList.add('hidden');
+ try{
+  const meta=await loadCryptoMeta(uid);
+  if(attempt!==lockRequest||!sessionScope.current(generation)||userId!==uid)return;
+  currentCryptoMeta=meta;if(meta)showLockUnlock();else showLockSetup();
+ }catch(error){
+  if(attempt!==lockRequest||!sessionScope.current(generation)||userId!==uid)return;
+  if(status)status.textContent=error.code==='permission-denied'?'Could not read encryption settings. Check Firebase permissions and try again.':error.message;
+  retry?.classList.remove('hidden');
+ }
+}
+document.getElementById('lock-retry')?.addEventListener('click',()=>{if(userId)loadLockScreen(userId);});
 
 // Called once the key is in memory: hide the lock screen, show loading, and
 // start the (decrypting) Firestore listener.
@@ -469,7 +499,7 @@ lockSetupForm?.addEventListener("submit", async (e) => {
     enterAppAfterUnlock();
   } catch (err) {
     console.error("[Crypto] Setup failed:", err);
-    showErr("Could not enable Lock Mode. Please try again.");
+    showErr(err.message?.startsWith('Encryption settings already exist')?err.message:"Could not enable Lock Mode. Please try again.");
     btn.disabled = false;
     btn.textContent = prev;
   }
@@ -509,6 +539,7 @@ lockUnlockForm?.addEventListener("submit", async (e) => {
 });
 
 function clearUnlockedState() {
+  lockRequest++;
   progressPage?.clear();
   unreadableRecords=0;
   tracking?.close();tracking=null;cloudCards=[];pendingRows=[];viewSequence++;
@@ -579,29 +610,11 @@ function initFirebase() {
         currentCryptoMeta = null;
         authSection?.classList.add("hidden");
         mainApp?.classList.add("hidden");
-        appLoading?.classList.remove("hidden");
+        appLoading?.classList.add("hidden");
         lockSection?.classList.add("hidden");
         authStatus && (authStatus.textContent = "");
         setHeaderAuthUI(true, user.displayName);
-        // Lock Mode gate: load crypto settings, then set up or unlock.
-        try {
-          const meta = await loadCryptoMeta(user.uid);
-          if (!sessionScope.current(generation) || userId !== user.uid) return;
-          currentCryptoMeta = meta;
-          if (!currentCryptoMeta) {
-            showLockSetup();
-          } else {
-            showLockUnlock();
-          }
-        } catch (err) {
-          if (!sessionScope.current(generation)) return;
-          console.error("[Crypto] Failed to load crypto meta:", err);
-          appLoading?.classList.add("hidden");
-          showModal(
-            "Error",
-            "Could not load your encryption settings. Please refresh and try again."
-          );
-        }
+        await loadLockScreen(user.uid,generation);
       } else {
         userId = null;
         cryptoKey = null;

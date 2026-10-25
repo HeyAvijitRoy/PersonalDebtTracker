@@ -21,6 +21,12 @@ const snapshot=(path)=>({id:path.split('/').at(-1),ref:ref(path),exists:()=>docs
 function emit(){sessionStorage.setItem("synthetic-cloud",JSON.stringify([...docs]));for(const listener of listeners){if(listener.active)queueMicrotask(()=>listener.fn({docs:[...docs.keys()].filter(path=>path.startsWith(listener.path+'/')&&path.split('/').length===listener.path.split('/').length+1).map(snapshot),metadata:{fromCache:false}}));}}
 globalThis.__syntheticEmit=emit;
 export const getDoc=async reference=>snapshot(reference.path);
+export const getDocFromCache=getDoc;
+export const getDocFromServer=async reference=>{
+ if(globalThis.__syntheticMetaHangs&&reference.path.endsWith('/meta/crypto'))return new Promise(()=>{});
+ if(globalThis.__syntheticMetaDenied&&reference.path.endsWith('/meta/crypto')){const error=new Error('Permission denied');error.code='permission-denied';throw error;}
+ return snapshot(reference.path);
+};
 export const setDoc=async(reference,value)=>{docs.set(reference.path,structuredClone(value));emit();};
 export const deleteDoc=async reference=>{docs.delete(reference.path);emit();};
 export const onSnapshot=(reference,fn)=>{const entry={path:reference.path,fn,active:true};listeners.push(entry);emit();return()=>entry.active=false;};

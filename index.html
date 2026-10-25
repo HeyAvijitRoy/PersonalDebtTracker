@@ -255,6 +255,11 @@
 
       <!-- Lock Mode: passphrase setup / unlock (shown between sign-in and app) -->
       <section id="lock-section" class="hidden max-w-md mx-auto mb-8">
+        <div id="lock-loading" class="hidden tracker-status">
+          <h2 class="text-xl font-semibold">Unlock your data</h2>
+          <p id="lock-loading-status" role="status" aria-live="polite">Loading your encryption settings...</p>
+          <button id="lock-retry" type="button" class="hidden tracker-button">Retry loading settings</button>
+        </div>
         <!-- First-time setup -->
         <div id="lock-setup" class="hidden">
           <div class="flex items-center gap-2 mb-2">

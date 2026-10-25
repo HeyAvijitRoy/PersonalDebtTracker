@@ -12,7 +12,8 @@ export async function createRuntimeServer({port=5173,config=true}={}){
   if(!['GET','HEAD'].includes(request.method)){response.writeHead(405);response.end('Method not allowed');return;}
   let pathname;try{pathname=new URL(request.url,'http://localhost').pathname;}catch{response.writeHead(400);response.end('Invalid path');return;}
   const filename=pathname==='/'?'index.html':pathname.slice(1);
-  if(!assets.has(filename)){response.writeHead(404);response.end('Not found');return;}
+  const runtimeModule=/^src\/[A-Za-z0-9_-]+\.mjs$/.test(filename);
+  if(!assets.has(filename)&&!runtimeModule){response.writeHead(404);response.end('Not found');return;}
   try{const data=await readFile(path.join(root,filename));response.setHeader('Content-Type',filename.endsWith('.html')?'text/html; charset=utf-8':filename.endsWith('.css')?'text/css':filename.endsWith('.svg')?'image/svg+xml':filename.endsWith('.webmanifest')?'application/manifest+json':'text/javascript; charset=utf-8');response.end(request.method==='HEAD'?undefined:data);}catch{response.writeHead(404);response.end('Not found');}
  });
  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});return server;

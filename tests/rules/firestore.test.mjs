@@ -68,3 +68,10 @@ test("purge can remove history across multiple bounded batches",async()=>{
  for(let index=0;index<records.docs.length;index+=200){const batch=writeBatch(db);records.docs.slice(index,index+200).forEach(row=>batch.delete(row.ref));await assertSucceeds(batch.commit());}
  await assertSucceeds(deleteDoc(doc(db,path)));
 });
+test('owner can create/read passphrase metadata; foreign users and malformed metadata are denied',async()=>{
+ const db=env.authenticatedContext('owner').firestore();const metadataPath='artifacts/demo-pdt/users/owner/meta/crypto';
+ await assertSucceeds(setDoc(doc(db,metadataPath),{v:1,salt:'A'.repeat(24),verifier:{iv:'A'.repeat(16),data:'A'.repeat(24)}}));
+ await assertSucceeds(getDoc(doc(db,metadataPath)));
+ await assertFails(getDoc(doc(env.authenticatedContext('other').firestore(),metadataPath)));
+ await assertFails(setDoc(doc(db,metadataPath),{v:1,salt:'A'.repeat(24)}));
+});

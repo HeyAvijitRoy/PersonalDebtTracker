@@ -10,6 +10,17 @@ Legend: ✅ shipped to `main` (live) · 🚧 on a branch, not yet merged ·
 
 ## 2026-10-25
 
+### Passphrase startup recovery - feature branch (local only)
+
+- Returning users can load an existing cached salt/verifier without waiting on
+  a stalled server request. Server-only confirmation is required for new setup.
+- Added a bounded metadata wait, a visible loading/error state, and Retry, plus
+  session guards and a transaction that prevents overwriting existing settings.
+- Updated the local server to recognize new runtime modules without a restart;
+  cached assets now use v8. No passphrases, keys, or live account data were changed.
+- Verified stalled-load/retry/cached-unlock browser paths and setup race/session
+  regressions. Real signed-out SDK startup was checked separately.
+
 ### Account tracking stages 2-7 - `feature/account-tracking-progress` (local only)
 
 - Implemented encrypted snapshot/history transactions, revision conflicts,
