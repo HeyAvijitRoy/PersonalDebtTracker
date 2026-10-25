@@ -34,6 +34,17 @@ try{
   const downloaded=page.waitForEvent('download');await tile.getByRole('button',{name:'Download payment schedule CSV',exact:true}).click();const csv=await readFile(await (await downloaded).path(),'utf8');assert.match(csv,/MONTH TOTAL/);assert.ok(csv.includes(large));assert.match(csv,/calendar labels are not due dates/);
  }
  assert.match(await avalanche.locator('.payment-month[data-month="1"] tbody tr').first().innerText(),/\$175\.00/);
+ for(const width of [1280,1440,1920,1024,640,390,320]){
+  await page.setViewportSize({width,height:1000});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`Page overflow at ${width}px`);
+  for(const tile of [avalanche,snowball]){
+   assert.equal(await tile.locator('.payment-month[data-month="1"] .table-scroll').evaluate(wrap=>wrap.scrollWidth>wrap.clientWidth+1),false,`Payment columns must fit at ${width}px`);
+   assert.equal(await tile.locator('.payment-month[data-month="1"] tbody td').evaluateAll(cells=>cells.every(cell=>{const bounds=cell.getBoundingClientRect(),wrap=cell.closest('.table-scroll').getBoundingClientRect();return bounds.left>=wrap.left-1&&bounds.right<=wrap.right+1&&getComputedStyle(cell).display!=='none';})),true);
+  }
+  const a=await avalanche.boundingBox(),s=await snowball.boundingBox();assert.ok(width>=1280?Math.abs(a.y-s.y)<2:s.y>a.y,`Strategy layout at ${width}px`);
+  if(width===1440)await page.locator('.payoff-comparison').screenshot({path:'test-results/payoff-tables-desktop.png',animations:'disabled'});
+ }
+ await page.setViewportSize({width:1280,height:900});
  await page.getByLabel('Small — planned baseline / month ($)',{exact:true}).fill('0');await page.locator('#sim-run').click();assert.match(await page.locator('#sim-output [role="alert"]').innerText(),/Small: \$0 baseline/);assert.equal(await page.locator('#sim-output [data-strategy]').count(),0);
  await page.getByRole('button',{name:'Enter baseline payments',exact:true}).click();assert.equal(await page.getByLabel('Small — planned baseline / month ($)',{exact:true}).evaluate(input=>input===document.activeElement),true);
  await page.getByLabel('Small — planned baseline / month ($)',{exact:true}).fill('25');

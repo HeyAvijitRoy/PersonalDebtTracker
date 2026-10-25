@@ -21,7 +21,8 @@
   .settings-menu > summary { @apply cursor-pointer px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700; }
   .settings-panel { @apply absolute right-0 top-full mt-2 p-3 grid gap-2 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-xl; width: min(16rem, calc(100vw - 2rem)); }
   .settings-panel > button { @apply text-left; }
-  .payoff-comparison { @apply grid grid-cols-1 lg:grid-cols-2 gap-4; }
+  .app-shell:has(#plan-view:not(.hidden)) { max-width: 100rem; }
+  .payoff-comparison { @apply grid grid-cols-1 xl:grid-cols-2 gap-4; }
   .payoff-inputs { @apply grid grid-cols-1 md:grid-cols-2 gap-4 text-sm; }
   .payoff-metrics { @apply grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm mt-4; }
   .payoff-metrics dt { @apply text-gray-600 dark:text-gray-400; }
@@ -103,11 +104,24 @@
   .payment-month { @apply my-2 rounded-lg border border-gray-200 dark:border-gray-700; }
   .payment-month > summary { @apply cursor-pointer p-3 text-sm font-semibold; }
   .payment-month > p { @apply mx-3 mb-3; }
-  .payment-table { min-width: 30rem; }
-  .payment-table tbody th { @apply font-medium; max-width: 12rem; }
+  .payment-table { table-layout: fixed; min-width: 0; }
+  .payment-table thead th:nth-child(1) { width: 28%; }
+  .payment-table thead th:nth-child(2) { width: 32%; }
+  .payment-table thead th:nth-child(3) { width: 18%; }
+  .payment-table thead th:nth-child(4) { width: 22%; }
+  .payment-table tbody th { @apply font-medium; }
   .payment-table tfoot { @apply font-semibold; }
   .payoff-warning { @apply my-3 p-3 rounded-lg border border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-100 text-sm; overflow-wrap: anywhere; }
   .payment-zero { @apply block mt-1 font-semibold text-amber-800 dark:text-amber-200; }
+  @media (max-width: 639px) {
+    .payment-table, .payment-table tbody, .payment-table tfoot { display: block; }
+    .payment-table thead { @apply sr-only; }
+    .payment-table tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .payment-table tbody tr { @apply border-b border-gray-300 dark:border-gray-600 pb-2 mb-2; }
+    .payment-table th, .payment-table td { border: 0; min-width: 0; }
+    .payment-table tbody th, .payment-table tfoot th, .payment-table td:first-of-type { grid-column: 1 / -1; }
+    .payment-table td::before { content: attr(data-label); display: block; @apply text-xs font-normal text-gray-500 dark:text-gray-400 mb-1; }
+  }
   .tracker-bar { @apply rounded-full h-3 bg-gray-200 dark:bg-gray-700 mt-1; }
   .tracker-bar > div { @apply rounded-full h-3 bg-sky-600; }
   .tracker-milestone { @apply my-2 p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-200; }

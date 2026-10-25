@@ -1,3 +1,16 @@
+## 2026-10-25 - Payment table layout
+
+- Widened the Payoff Plan shell to a 100rem desktop maximum while retaining the
+  existing Accounts/Progress width. Show strategies side by side from 1280px;
+  stack them below that width so their payment columns remain readable.
+- Removed payment-table minimum width and fitted all four columns to each tile.
+  On phones, account rows use labelled payment/interest/remaining fields, retaining
+  table semantics and all values without horizontal scrolling. Kept existing
+  schedules, monthly totals, downloads, and zero-baseline review.
+- Browser coverage checks both tables and all account cells at 320, 390, 640,
+  1024, 1280, 1440, and 1920px, including side-by-side/stacked layout and no
+  horizontal overflow. Cache v19. No financial logic or security rules changed.
+
 ## 2026-10-25 - Monthly account payment schedules and zero-baseline review
 
 - Added per-account monthly payment plans above each strategy's payoff-order
