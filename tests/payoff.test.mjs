@@ -33,3 +33,30 @@ test('closed and archived debt remains in the plan while deleted debt is exclude
  const result=comparePayoff([{...card('closed',100,0),status:'closed'},{...card('archived',100,0),archived:true},{...card('deleted',100,0),deletedAt:'2026-10-25'}],{budget:50});
  assert.equal(result.accounts,2);assert.equal(result.avalanche.principalCents,20000);
 });
+
+test('monthly account payments reconcile with every aggregate and roll freed baselines forward',()=>{
+ const cards=[card('large',1000,24),card('small',300,12)];
+ for(const mode of [{budget:200},{mode:'deadline',months:12}])for(const plan of Object.values(comparePayoff(cards,{...mode,baseline:{large:10,small:10}})).filter(value=>value?.schedule)){
+  const previous=new Map(cards.map(row=>[row.id,row.balance*100]));
+  for(const month of plan.schedule.slice(1)){
+   for(const row of month.accounts){
+    assert.equal(row.openingCents,previous.get(row.id));
+    assert.equal(row.openingCents+row.interestCents-row.paidCents,row.balanceCents);
+    assert.equal(row.baselineCents+row.extraCents,row.paidCents);assert.ok(row.baselineCents<=1000);
+    previous.set(row.id,row.balanceCents);
+   }
+   for(const key of ['interestCents','paidCents','balanceCents'])assert.equal(month.accounts.reduce((sum,row)=>sum+row[key],0),month[key]);
+   assert.ok(month.paidCents<=plan.budgetCents);
+  }
+  assert.ok([...previous.values()].every(value=>value===0));
+ }
+ const rolled=comparePayoff([card('first',10,0),card('second',100,0)],{budget:50,baseline:{first:20,second:20}}).snowball;
+ assert.equal(rolled.schedule[1].accounts[0].baselineCents,1000);assert.equal(rolled.schedule[1].accounts[1].paidCents,4000);
+ assert.equal(rolled.schedule[2].accounts.length,1);assert.equal(rolled.finalPaymentCents,1000);
+});
+
+test('zero-baseline allocations retain outstanding accounts and interest for review',()=>{
+ const plan=comparePayoff([card('high',1000,24),card('low',100,12)],{budget:100}).avalanche;
+ const low=plan.schedule[1].accounts.find(row=>row.id==='low');
+ assert.equal(low.paidCents,0);assert.equal(low.interestCents,100);assert.equal(low.balanceCents,10100);
+});
