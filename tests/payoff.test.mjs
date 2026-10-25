@@ -6,6 +6,8 @@ test('zero-interest plans preserve principal and charge only the smaller final p
  const result=comparePayoff([card('one',100,0)],{budget:30});
  assert.equal(result.avalanche.months,4);assert.equal(result.avalanche.finalPaymentCents,1000);
  assert.equal(result.avalanche.totalPaidCents,10000);assert.equal(result.interestDifferenceCents,0);
+ const single=comparePayoff([card('one',100,12)],{budget:101}).avalanche;
+ assert.equal(single.months,1);assert.equal(single.interestCents,100);assert.equal(single.totalPaidCents,10100);
 });
 test('same-budget strategies compare interest and payoff milestones with baseline payments',()=>{
  const result=comparePayoff([card('large',2000,30),card('small',500,5)],{budget:200,baseline:{large:25,small:25}});

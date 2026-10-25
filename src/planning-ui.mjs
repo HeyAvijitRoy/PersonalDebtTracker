@@ -23,7 +23,7 @@ export async function showPlanning(store,card,context){
  const cutoff=field(form,"Issuer cutoff and timezone, if known","text",statement?.cutoff);
  const handled=field(form,"I have handled this statement (personal reminder only)","checkbox",statement?.handled);
  const rateBasis=field(form,"Does the entered APR cover the whole tracked balance?","select",card.rateBasis??"single",[["single","One applicable APR assumption"],["mixed","Multiple APR categories"],["unknown","Unknown"]]);
- const scenario=field(form,"Include this balance in hypothetical interest-cost comparisons","checkbox",card.interestScenario??card.entryMethod!=="availableCredit");
+ const scenario=field(form,"Include in monthly/annual cost tiles and ranking","checkbox",card.interestScenario??card.entryMethod!=="availableCredit");
  form.append(element("h3","Promotion reference (optional)","font-semibold"));
  const type=field(form,"Promotion type","select",promo?.type??"unknown",[["unknown","Unknown / not specified"],["zero","0% APR"],["deferred","Deferred interest"]]);
  const start=field(form,"Promotion start date","date",promo?.startDate),end=field(form,"Promotion end date","date",promo?.endDate),promoBalance=field(form,"Promotional balance reference ($)","number",promo?.balance),postApr=field(form,"Post-promotion APR reference (%)","number",promo?.postApr),note=field(form,"Promotion terms / notes (one reference; list other offers here)","text",promo?.note);

@@ -6,8 +6,8 @@ function portfolio(cards,baseline={}){
  const seen=new Set();
  const rows=cards.filter(card=>!card.deletedAt&&moneyToCents(card.balance)>0).map(card=>{
   if(typeof card.id!=='string'||seen.has(card.id))throw new Error('Account identifiers must be unique.');seen.add(card.id);
-  if(card.rateBasis&&card.rateBasis!=='single')throw new Error('Every included balance needs a single applicable APR assumption. Mixed or unknown APRs cannot be compared.');
-  if(card.promotion?.type==='deferred')throw new Error('Deferred-interest terms cannot be modeled as ordinary APR. Check issuer terms before comparing this portfolio.');
+  if(card.rateBasis&&card.rateBasis!=='single')throw new Error(`${card.name}: a single applicable APR assumption is required. Mixed or unknown APRs cannot be compared.`);
+  if(card.promotion?.type==='deferred')throw new Error(`Deferred-interest terms on ${card.name} cannot be modeled as ordinary APR. Check issuer terms before comparing this portfolio.`);
   return {id:card.id,name:String(card.name),balance:moneyToCents(card.balance),rate:aprToBasisPoints(card.apr),base:moneyToCents(baseline[card.id]??0)};
  });
  if(Object.keys(baseline).some(id=>!seen.has(id)&&moneyToCents(baseline[id])!==0))throw new Error('A baseline payment refers to an account without an outstanding balance.');

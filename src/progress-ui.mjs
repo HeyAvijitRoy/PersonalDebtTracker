@@ -25,10 +25,10 @@ export class ProgressPage {
   Object.assign(this,{getStore,getCards});this.cache=new Map();this.sequence=0;
   for(const id of ['progress-account','progress-period','progress-from','progress-through'])document.getElementById(id)?.addEventListener('change',()=>this.refresh());
   document.getElementById('progress-refresh')?.addEventListener('click',()=>{this.cache.clear();this.refresh();});
-  window.addEventListener('hashchange',()=>this.route());this.route();
+  this.route();
  }
  clear(){this.sequence++;this.cache.clear();for(const id of ['progress-results','progress-account'])document.getElementById(id)?.replaceChildren();for(const id of ['progress-from','progress-through']){const input=document.getElementById(id);if(input)input.value='';}}
- route(){const active=location.hash==='#progress';document.getElementById('dashboard-view')?.classList.toggle('hidden',active);document.getElementById('progress-view')?.classList.toggle('hidden',!active);if(active)this.refresh();}
+ route(){if(location.hash==='#progress')this.refresh();}
  async refresh(){
   if(location.hash!=='#progress')return;
   const store=this.getStore(),container=document.getElementById('progress-results');if(!store||!container)return;

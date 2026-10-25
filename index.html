@@ -143,36 +143,15 @@
         </div>
 
         <nav aria-label="Primary" class="flex flex-wrap gap-2 text-sm">
+          <a href="#accounts" class="nav-link tracker-button">Accounts</a>
+          <a href="#plan" class="nav-link tracker-button">Payoff Plan</a>
           <a href="#progress" class="nav-link tracker-button">Progress</a>
-          <a
-            href="#accounts"
-            class="nav-link px-3 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
-            >Accounts</a
-          >
-          <a
-            href="#hints"
-            class="nav-link px-3 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
-            >Utilization Targets</a
-          >
-          <a
-            href="#strategies"
-            class="nav-link px-3 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
-            >Strategies</a
-          >
-          <a
-            href="#optimizer"
-            class="nav-link px-3 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
-            >0% Optimizer</a
-          >
-          <a
-            href="#simulator"
-            class="nav-link px-3 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
-            >Simulator</a
-          >
         </nav>
 
         <div class="flex items-center gap-2">
-          <div class="hidden sm:flex gap-2">
+          <details id="settings-menu" class="settings-menu">
+            <summary>Settings &amp; data</summary>
+            <div class="settings-panel">
             <button
               id="import-csv-btn"
               class="text-sm px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
@@ -193,6 +172,7 @@
               Export JSON
             </button>
           </div>
+          </details>
           <button
             id="theme-toggle"
             type="button"
@@ -492,6 +472,7 @@
               style="width: 0%"
             ></div>
           </div>
+          <div id="utilization-kpis" class="target-kpis mt-4" aria-label="Overall utilization target amounts"></div>
         </section>
 
         <!-- Accounts List -->
@@ -581,7 +562,7 @@
           <h2 class="text-lg font-semibold mb-4 text-gray-800 dark:text-gray-100">
             Credit Utilization Targets
           </h2>
-          <div class="tracker-actions">
+          <div class="target-editor">
             <label>Utilization targets (%)<input id="utilization-targets" class="tracker-input" value="80, 50, 30" aria-describedby="targets-help" /></label>
             <button id="save-utilization-targets" class="tracker-button" type="button">Save targets</button>
           </div>
@@ -592,6 +573,40 @@
               Add accounts to see utilization thresholds and “nudge” amounts.
             </p>
           </div>
+        </section>
+
+        <!-- Mobile-only floating "Add Account" shortcut -->
+        <button
+          type="button"
+          onclick="focusAddForm()"
+          class="sm:hidden fixed bottom-5 left-4 z-[1050] w-12 h-12 rounded-full bg-sky-600 text-white shadow-lg flex items-center justify-center hover:bg-sky-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+          aria-label="Add account"
+          title="Add account"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </button>
+        </div>
+        <section id="plan-view" class="hidden" aria-labelledby="plan-title">
+          <h2 id="plan-title" class="text-xl font-semibold mb-2">Payoff Plan</h2>
+          <p class="tracker-help mb-5">Explore future scenarios. Progress shows your recorded balance history.</p>
+        <section id="simulator" class="app-panel" aria-labelledby="payoff-comparison-title">
+          <h2 id="payoff-comparison-title" class="text-lg font-semibold">Compare payoff strategies</h2>
+          <p class="tracker-help mb-4">Hypothetical future outcomes from your latest tracked balances. Nothing here changes your accounts or records a payment.</p>
+          <div class="payoff-inputs">
+            <label>Plan by<select id="sim-mode" class="tracker-input"><option value="budget">Combined monthly budget</option><option value="deadline">Target payoff months</option></select></label>
+            <label id="sim-budget-field">Monthly budget for all cards ($)<input id="sim-budget" class="tracker-input" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="400" /></label>
+            <label id="sim-months-field" class="hidden">Pay off within (months)<input id="sim-months" class="tracker-input" type="number" min="1" max="600" step="1" placeholder="12" /></label>
+          </div>
+          <details class="tracker-details"><summary>Optional baseline payments per account</summary>
+            <p class="tracker-help">Enter your planned starting payments for this simulation only. These are not calculated issuer minimums. The remaining budget follows each strategy, and payments roll forward as accounts clear.</p>
+            <label class="my-3"><input id="sim-baseline-enabled" type="checkbox" /> Use per-account baseline payments</label>
+            <div id="sim-baseline-fields" class="payoff-inputs hidden"></div>
+          </details>
+          <p class="tracker-help">Assumes no new purchases or fees, fixed entered APRs, monthly interest rounded to cents before payments, and payments at month end. Promotional expiry and daily billing calculations are not modeled. Meet issuer payment requirements separately. Without baselines, other cards may receive $0 in this illustrative model.</p>
+          <button id="sim-run" type="button" class="account-update mt-4">Compare both strategies</button>
+          <div id="sim-output" class="mt-4" aria-live="polite"></div>
         </section>
 
         <!-- Strategies + Cost -->
@@ -652,81 +667,10 @@
           </div>
         </section>
 
-        <!-- Payoff Schedule Simulator -->
-        <section
-          id="simulator"
-          class="bg-gray-50 dark:bg-gray-800/60 p-5 rounded-lg mb-8 shadow-sm border border-transparent dark:border-gray-800 scroll-mt-4"
-        >
-          <h2
-            class="text-lg font-semibold mb-4 text-gray-800 dark:text-gray-100 flex items-center"
-          >
-            <span class="mr-2">Payoff Schedule Simulator</span>
-            <span class="text-xs font-medium text-gray-500 dark:text-gray-400"
-              >(month-by-month projection)</span
-            >
-          </h2>
-          <div class="space-y-3">
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label class="block text-sm text-gray-700 dark:text-gray-300 mb-1" for="sim-budget"
-                  >Monthly Payment Budget ($)</label
-                >
-                <input
-                  id="sim-budget"
-                  type="number"
-                  inputmode="decimal"
-                  step="0.01"
-                  min="0"
-                  placeholder="400"
-                  class="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                />
-                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Total you can put toward all cards each month.
-                </p>
-              </div>
-              <div>
-                <label class="block text-sm text-gray-700 dark:text-gray-300 mb-1" for="sim-strategy"
-                  >Strategy</label
-                >
-                <select
-                  id="sim-strategy"
-                  class="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                >
-                  <option value="avalanche">Avalanche (Highest APR First)</option>
-                  <option value="snowball">Snowball (Lowest Balance First)</option>
-                </select>
-              </div>
-            </div>
-            <div class="flex flex-wrap items-center gap-3">
-              <button
-                id="sim-run"
-                class="px-4 py-2 bg-sky-600 text-white rounded-lg font-semibold hover:bg-sky-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
-              >
-                Run Simulation
-              </button>
-            </div>
-            <p class="tracker-help">Illustrative scenario: assumes the entered APR applies, rates and balances follow the model, and no new purchases occur. Meet issuer payment requirements separately; this is not a bank payment schedule.</p>
-          <div id="sim-output" class="mt-3 space-y-2 text-sm text-gray-700 dark:text-gray-300">
-              <p class="text-gray-500 dark:text-gray-400">
-                Enter a monthly budget and click “Run Simulation”.
-              </p>
-            </div>
-          </div>
-        </section>
-
         <!-- Balance Transfer Optimizer (full width) -->
-        <section
-          id="optimizer"
-          class="bg-gray-50 dark:bg-gray-800/60 p-5 rounded-lg shadow-sm border border-transparent dark:border-gray-800 scroll-mt-4"
-        >
-          <h2
-            class="text-lg font-semibold mb-4 text-gray-800 dark:text-gray-100 flex items-center"
-          >
-            <span class="mr-2">Balance-Transfer Optimizer</span>
-            <span class="text-xs font-medium text-gray-500 dark:text-gray-400"
-              >(0% APR planner)</span
-            >
-          </h2>
+        <details id="optimizer" class="app-panel optimizer-accordion">
+          <summary><span>Balance Transfer Optimizer</span><span id="optimizer-availability" class="optimizer-badge">Optional planning tool</span></summary>
+          <p class="tracker-help mb-4">A recorded 0% purchase promotion does not confirm transfer eligibility. Open this tool to explore an issuer offer; confirm transfer APR, expiry, fees and eligibility separately.</p>
           <div class="space-y-3">
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
               <div class="md:col-span-2">
@@ -850,21 +794,9 @@
               </p>
             </div>
           </div>
-        </section>
+        </details>
 
-        <!-- Mobile-only floating "Add Account" shortcut -->
-        <button
-          type="button"
-          onclick="focusAddForm()"
-          class="sm:hidden fixed bottom-5 left-4 z-[1050] w-12 h-12 rounded-full bg-sky-600 text-white shadow-lg flex items-center justify-center hover:bg-sky-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
-          aria-label="Add account"
-          title="Add account"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-        </button>
-        </div>
+        </section>
         <section id="progress-view" class="hidden" aria-labelledby="progress-title">
           <h2 id="progress-title" class="text-xl font-semibold">Balance progress</h2>
           <p class="tracker-help">Recorded estimated balances over time. These are balance reductions and increases, not a total of payments made. Missing history is never shown as zero.</p>

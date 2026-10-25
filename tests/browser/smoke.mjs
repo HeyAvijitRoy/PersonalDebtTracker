@@ -47,7 +47,7 @@ try {
  await page.waitForFunction(()=>document.querySelector('#sync-status')?.textContent.includes('No local drafts'));
  await page.locator('.account-menu summary').click();await page.getByRole('button',{name:'Statement & planning',exact:true}).click();
  await page.getByLabel('Statement closing date',{exact:true}).fill('2026-10-01');await page.getByLabel('Payment due date',{exact:true}).fill('2026-11-10');await page.getByLabel('Statement balance ($)',{exact:true}).fill('1500');
- await page.getByLabel('Include this balance in hypothetical interest-cost comparisons',{exact:true}).check();
+ await page.getByLabel('Include in monthly/annual cost tiles and ranking',{exact:true}).check();
  await page.getByRole('button',{name:'Save statement and promotion references',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('#sync-status')?.textContent.includes('No local drafts'));
  await page.locator('.account-menu summary').click();await page.getByRole('button',{name:'Record payment',exact:true}).click();await page.getByLabel('Payment amount ($)',{exact:true}).fill('100');await page.getByRole('button',{name:'Save payment record',exact:true}).click();
@@ -56,6 +56,7 @@ try {
  await page.locator('.account-menu summary').click();await page.getByRole('button',{name:'Statement & planning',exact:true}).click();
  await page.getByText('Statement balance minus linked posted payment records: $1,400.00.',{exact:false}).waitFor();
  await page.locator('dialog[open]').getByRole('button',{name:'Close',exact:true}).click();
+ await page.locator('#settings-menu > summary').click();
  const downloaded=page.waitForEvent('download');await page.locator('button[onclick="exportData(\'json\')"]').first().click();
  const backup=JSON.parse(await readFile(await (await downloaded).path(),'utf8'));assert.equal(backup.accounts.length,1);assert.ok(backup.accounts[0].events.length>=4);
  await page.getByRole('link',{name:'Progress',exact:true}).click();

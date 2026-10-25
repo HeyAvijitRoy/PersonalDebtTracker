@@ -11,6 +11,8 @@ import { BACKUP_FORMAT,validateBackup,csvCell } from "./src/backup.mjs";
 import { showPlanning,showPayment,showTransfer } from "./src/planning-ui.mjs";
 import { scenarioCost,reminders } from "./src/planning.mjs";
 import { ProgressPage } from "./src/progress-ui.mjs";
+import { PayoffPlan } from "./src/payoff-ui.mjs";
+import { utilizationTargets } from "./src/utilization.mjs";
 import { preferences } from "./src/preferences.mjs";
 import { loadLockMetadata } from "./src/lock-gate.mjs";
 import { fallbackAfter,fetchCryptoMetadata,metadataCache } from "./src/metadata-transport.mjs";
@@ -21,7 +23,7 @@ let accountReader=null,refreshAccounts=null,stopAccountReads=null,accountCommitV
 const sessionScope = new SessionScope();
 let tracking=null,cloudCards=[],pendingRows=[],viewSequence=0;
 let cleanupRunning=false;
-let progressPage=null;
+let progressPage=null,payoffPlan=null;
 let uiPreferences=preferences();
 let unreadableRecords=0;
 
@@ -49,9 +51,6 @@ const accountsMeta = document.getElementById("accounts-meta");
 const accountSearchInput = document.getElementById("account-search");
 const importCsvBtn = document.getElementById("import-csv-btn");
 const importCsvInput = document.getElementById("import-csv-input");
-const simBudgetInput = document.getElementById("sim-budget");
-const simStrategySelect = document.getElementById("sim-strategy");
-const simRunBtn = document.getElementById("sim-run");
 
 // Auth / modal
 const authSection = document.getElementById("auth-section");
@@ -582,7 +581,7 @@ function clearUnlockedState() {
   stopAccountReads?.();stopAccountReads=null;refreshAccounts=null;accountReader=null;
   document.getElementById('account-connection')?.classList.add('hidden');
   lockRequest++;
-  progressPage?.clear();
+  progressPage?.clear();payoffPlan?.clear();
   unreadableRecords=0;
   tracking?.close();tracking=null;cloudCards=[];pendingRows=[];viewSequence++;
   document.querySelectorAll(".tracker-undo").forEach(element=>element.remove());
@@ -596,7 +595,7 @@ function clearUnlockedState() {
   editingId = null;
   editingBase = null;
   searchQuery='';if(accountSearchInput)accountSearchInput.value='';
-  for (const id of ["card-list", "avalanche-list", "snowball-list", "expensive-list", "fico-hints", "bt-output", "sim-output","upcoming-reminders","sync-status","data-quality-notice"]) {
+  for (const id of ["card-list", "avalanche-list", "snowball-list", "expensive-list", "fico-hints", "bt-output", "sim-output","upcoming-reminders","sync-status","data-quality-notice","utilization-kpis"]) {
     document.getElementById(id)?.replaceChildren();
   }
   for (const element of [totalDebtDisplay, totalCreditLineDisplay, totalMonthlyInterestDisplay, totalYearlyInterestDisplay]) {
@@ -691,12 +690,15 @@ function setupFirestoreListener(uid) {
     if(!active()||!sessionScope.accepts(ticket))return;
     cloudCards=decrypted;window.__latestCards=decrypted;unreadableRecords=rejected;
     if(editingId&&!decrypted.some(card=>card.id===editingId))editingId=null;
+    const first=!firstSnapshotReceived;
     firstSnapshotReceived=true;appLoading?.classList.add('hidden');mainApp?.classList.remove('hidden');
     if(tracking)await refreshTrackingView();else renderAll(decrypted);
+    if(first)routeViews();
     if(!cached&&active()&&sessionScope.accepts(ticket))readCache.write(namespace,valid,rejected).catch(()=>{});
   }
   refreshAccounts=async()=>{
     if(!active()||stopped||busy)return;
+    if(live){notice('');return;}
     busy=true;notice('Refreshing encrypted account data...');
     try {
       const version=accountCommitVersion,rows=await reader.accounts();
@@ -785,65 +787,15 @@ function rankByInterestPer100(cards) {
 
 // FICO optics
 function computeFicoHints(cards) {
-  const thresholds = uiPreferences.targets;
-  let over80 = 0,
-    over50 = 0,
-    over30 = 0;
-  const nudges = [];
-  let sumTo80 = 0,
-    sumTo50 = 0,
-    sumTo30 = 0;
-
-  for (const c of cards) {
-    if(c.status==='closed')continue;
-    const bal = +c.balance || 0,
-      lim = +c.creditLimit || 0;
-    if (!lim || bal <= 0) continue;
-    const util = (bal / lim) * 100;
-    if (util > 80) {
-      over80++;
-      sumTo80 += bal - 0.8 * lim;
-    }
-    if (util > 50) {
-      over50++;
-      sumTo50 += bal - 0.5 * lim;
-    }
-    if (util > 30) {
-      over30++;
-      sumTo30 += bal - 0.3 * lim;
-    }
-
-    const next = thresholds.find((t) => util > t);
-    if (next !== undefined) {
-      const targetBal = (next / 100) * lim;
-      const dollarsToDrop = paymentToTarget(bal, lim, next) / 100;
-      if (dollarsToDrop > 0)
-        nudges.push({
-          name: c.name,
-          currentUtil: util,
-          nextThreshold: next,
-          dollarsToDrop,
-        });
-    }
+  const thresholds=uiPreferences.targets,nudges=[];
+  const open=cards.filter(card=>card.status!=='closed');
+  for(const card of open){
+    if(card.creditLimit<=0||card.balance<=0)continue;
+    const util=card.balance/card.creditLimit*100,next=thresholds.find(target=>util>target);
+    if(next!==undefined){const amount=paymentToTarget(card.balance,card.creditLimit,next);if(amount>0)nudges.push({name:card.name,currentUtil:util,nextThreshold:next,dollarsToDrop:amount/100});}
   }
-  nudges.sort((a, b) => a.dollarsToDrop - b.dollarsToDrop);
-
-  const { limit } = computeTotals(cards);
-  const openDebt=cards.filter(card=>card.status!=='closed').reduce((sum,card)=>sum+card.balance,0);
-  const to50Overall = limit>0?Math.max(0, openDebt - 0.5 * limit):null;
-  const to30Overall = limit>0?Math.max(0, openDebt - 0.3 * limit):null;
-
-  return {
-    over80,
-    over50,
-    over30,
-    nudges,
-    sumTo80,
-    sumTo50,
-    sumTo30,
-    to50Overall,
-    to30Overall,
-  };
+  nudges.sort((a,b)=>a.dollarsToDrop-b.dollarsToDrop);
+  return {nudges,thresholds:utilizationTargets(cards,thresholds)};
 }
 
 function renderCardFicoHint(card) {
@@ -945,59 +897,6 @@ function planBalanceTransfer(
     netIntroSavings,
     moves,
   };
-}
-
-// Payoff schedule simulator
-function simulatePayoff(cards, monthlyBudget, strategy) {
-  if(cards.some(card=>hasBalance(card)&&card.rateBasis&&card.rateBasis!=='single'))return {error:'Mixed or unknown APR categories need a single-rate scenario assumption before simulation.'};
-  const MAX_MONTHS = 600; // 50-year safety cap
-  let working = cards
-    .map((c) => ({ name: c.name, balance: +c.balance || 0, apr: +c.apr || 0 }))
-    .filter((c) => c.balance > 0);
-
-  if (!working.length) return { months: 0, totalInterest: 0, payoffOrder: [] };
-
-  const budget = Math.max(0, +monthlyBudget || 0);
-  let totalInterest = 0;
-  let months = 0;
-  const payoffOrder = [];
-
-  while (working.length && months < MAX_MONTHS) {
-    months++;
-    for (const c of working) {
-      const interest = monthlyInterest(c.balance, c.apr);
-      c.balance += interest;
-      totalInterest += interest;
-    }
-    const order =
-      strategy === "snowball"
-        ? [...working].sort((a, b) => a.balance - b.balance)
-        : [...working].sort((a, b) => b.apr - a.apr);
-
-    let remaining = budget;
-    for (const c of order) {
-      if (remaining <= 0) break;
-      const pay = Math.min(remaining, c.balance);
-      c.balance -= pay;
-      remaining -= pay;
-    }
-    working = working.filter((c) => {
-      if (c.balance <= 0.01) {
-        payoffOrder.push({ name: c.name, month: months });
-        return false;
-      }
-      return true;
-    });
-  }
-
-  if (working.length) {
-    return {
-      error:
-        "This budget isn't enough to pay off your balances within 50 years — try a higher monthly amount.",
-      payoffOrder,
-    };
-  }
-  return { months, totalInterest, payoffOrder };
 }
 
 // Sorting
@@ -1131,7 +1030,7 @@ function renderAll(cards) {
   renderExpensive(cards);
   renderFicoHints(cards);
   renderReminders(cards);
-  progressPage?.refresh();
+  progressPage?.refresh();payoffPlan?.refresh();
 }
 
 function renderCards(cards) {
@@ -1480,60 +1379,21 @@ function renderFicoHints(cards) {
   const box = document.getElementById("fico-hints");
   if (!box) return;
   box.innerHTML = "";
+  document.getElementById("utilization-kpis")?.replaceChildren();
   if (!cards.length) {
     box.innerHTML =
       '<button type="button" onclick="focusAddForm()" class="text-gray-500 dark:text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 hover:underline transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded">Add accounts to see utilization thresholds and “nudge” amounts.</button>';
-    return;
   }
-  const { util,limit } = computeTotals(cards);
-  const {
-    over80,
-    over50,
-    over30,
-    nudges,
-    sumTo80,
-    sumTo50,
-    sumTo30,
-    to50Overall,
-    to30Overall,
-  } = computeFicoHints(cards);
-
-  const thresholdTile = (label, count, minToTame) => {
-    const theme = count
-      ? "bg-rose-50 dark:bg-rose-950/30 border-rose-100 dark:border-rose-900 text-rose-700 dark:text-rose-400"
-      : "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-100 dark:border-emerald-900 text-emerald-700 dark:text-emerald-400";
-    return `
-      <div class="rounded-lg p-3 border ${theme}">
-        <p class="text-xs uppercase tracking-wide opacity-80">Cards ${label}</p>
-        <p class="text-xl font-bold">${count}</p>
-        ${
-          count
-            ? `<p class="text-xs mt-1 opacity-90">Amount to reach target: ${fmtMoney(minToTame)}</p>`
-            : `<p class="text-xs mt-1 opacity-90">All clear</p>`
-        }
-      </div>
-    `;
-  };
-
-  const summary = document.createElement("div");
-  summary.className =
-    "p-3 bg-white dark:bg-gray-900 rounded-md shadow-sm border border-gray-200 dark:border-gray-800";
-  summary.innerHTML = `
-    <div class="flex items-center justify-between mb-3">
-      <span class="text-sm text-gray-600 dark:text-gray-400">Overall Utilization</span>
-      <span class="text-lg font-bold text-gray-900 dark:text-gray-100">${util.toFixed(1)}%</span>
-    </div>
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-      ${thresholdTile("&gt;80%", over80, sumTo80)}
-      ${thresholdTile("&gt;50%", over50, sumTo50)}
-      ${thresholdTile("&gt;30%", over30, sumTo30)}
-    </div>
-    <div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400 flex flex-wrap gap-x-4 gap-y-1">
-      <span>To reach 50% overall: <span class="font-semibold text-gray-700 dark:text-gray-300">${to50Overall===null?'Unavailable':fmtMoney(to50Overall)}</span></span>
-      <span>To reach 30% overall: <span class="font-semibold text-gray-700 dark:text-gray-300">${to30Overall===null?'Unavailable':fmtMoney(to30Overall)}</span></span>
-    </div>
-  `;
-  box.appendChild(summary);
+  const { util,limit } = computeTotals(cards),{nudges,thresholds}=computeFicoHints(cards);
+  const overview=document.getElementById('utilization-kpis');overview?.replaceChildren();
+  for(const row of thresholds){
+    const overall=row.overallCents;
+    const tile=uiElement('article',null,'utilization-target-kpi');tile.dataset.target=row.target;
+    tile.classList.toggle('target-reached',overall===0);
+    tile.append(uiElement('h3',`Overall target: ${row.target}%`,'font-semibold'),uiElement('p',overall===null?'Unavailable':overall===0?'Target reached':fmtMoney(overall/100),'text-xl font-bold mt-2'),uiElement('p',overall===null?'Add positive limits for all included balances.':overall===0?`Current estimated utilization: ${util.toFixed(1)}%`:`Estimated payment to reach ${row.target}% overall`,'tracker-help'));
+    overview?.append(tile);
+    const accountTile=uiElement('div',null,'tracker-kpi');accountTile.append(uiElement('h3',`Cards above ${row.target}%`,'font-semibold'),uiElement('p',String(row.count),'text-xl font-bold'),uiElement('p',row.count?`Combined payment to bring each card to target: ${fmtMoney(row.paymentCents/100)}`:'No open tracked cards exceed this target.','tracker-help'));box.append(accountTile);
+  }
 
   if (nudges.length) {
     const list = document.createElement("div");
@@ -2208,78 +2068,6 @@ btRunBtn?.addEventListener("click", () => {
   }
 });
 
-// Payoff simulator: Run
-simRunBtn?.addEventListener("click", () => {
-  const out = document.getElementById("sim-output");
-  if (!out) return;
-
-  if (!window.__latestCards.length) {
-    showModal("No Data", "Please add accounts first.");
-    return;
-  }
-  const budget = +simBudgetInput?.value || 0;
-  if (budget <= 0) {
-    showModal("Missing Budget", "Enter a monthly payment budget greater than $0.");
-    return;
-  }
-  const strategy = simStrategySelect?.value || "avalanche";
-  const result = simulatePayoff(window.__latestCards, budget, strategy);
-  out.innerHTML = "";
-
-  if (result.error) {
-    out.innerHTML = `<p class="text-rose-600 dark:text-rose-400">${escapeHtml(result.error)}</p>`;
-    return;
-  }
-
-  const years = Math.floor(result.months / 12);
-  const remMonths = result.months % 12;
-  const durationText = [
-    years ? `${years} year${years === 1 ? "" : "s"}` : null,
-    remMonths ? `${remMonths} month${remMonths === 1 ? "" : "s"}` : null,
-  ]
-    .filter(Boolean)
-    .join(" ") || "0 months";
-
-  const payoffDate = new Date();
-  payoffDate.setMonth(payoffDate.getMonth() + result.months);
-  const payoffDateText = payoffDate.toLocaleDateString("en-US", {
-    month: "long",
-    year: "numeric",
-  });
-
-  const hdr = document.createElement("div");
-  hdr.className =
-    "p-3 bg-white dark:bg-gray-900 rounded-md border border-gray-200 dark:border-gray-800";
-  hdr.innerHTML = `
-    <p>Simulated payoff time: <span class="font-semibold">${durationText}</span> <span class="text-xs text-gray-500 dark:text-gray-400">(~${payoffDateText})</span></p>
-    <p>Simulated total interest: <span class="font-semibold text-rose-700 dark:text-rose-400">${fmtMoney(
-      result.totalInterest
-    )}</span></p>
-  `;
-  out.appendChild(hdr);
-
-  if (result.payoffOrder.length) {
-    const list = document.createElement("div");
-    list.className = "mt-3 space-y-2";
-    const title = document.createElement("p");
-    title.className = "font-medium";
-    title.textContent = "Payoff order:";
-    list.appendChild(title);
-
-    result.payoffOrder.forEach((p, i) => {
-      const row = document.createElement("div");
-      row.className =
-        "flex items-center justify-between gap-3 p-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm";
-      row.innerHTML = `
-        <span class="min-w-0 break-words"><span class="font-medium">${i + 1}.</span> ${escapeHtml(p.name)}</span>
-        <span class="text-xs text-gray-500 dark:text-gray-400 shrink-0">Month ${p.month}</span>
-      `;
-      list.appendChild(row);
-    });
-    out.appendChild(list);
-  }
-});
-
 // Optimizer: Reset
 btResetBtn?.addEventListener("click", () => {
   if (btTargetSelect) btTargetSelect.value = "";
@@ -2295,43 +2083,20 @@ btResetBtn?.addEventListener("click", () => {
   toast("Optimizer reset");
 });
 
-// ====== SCROLLSPY (highlight nav link for section in view) ======
-const NAV_ACTIVE_CLASSES = [
-  "bg-sky-50",
-  "dark:bg-sky-950/50",
-  "border-sky-300",
-  "dark:border-sky-700",
-  "text-sky-700",
-  "dark:text-sky-300",
-  "font-semibold",
-];
-const navLinks = Array.from(document.querySelectorAll(".nav-link"));
-const navSections = navLinks
-  .map((link) => document.querySelector(link.getAttribute("href")))
-  .filter(Boolean);
-
-function setActiveNav(id) {
-  if(location.hash==='#progress')id='progress';
-  navLinks.forEach((link) => {
-    const isActive = link.getAttribute("href") === `#${id}`;
-    NAV_ACTIVE_CLASSES.forEach((c) => link.classList.toggle(c, isActive));
-    if(isActive)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');
-  });
+// ====== VIEW NAVIGATION ======
+const NAV_ACTIVE_CLASSES=['bg-sky-50','dark:bg-sky-950/50','border-sky-300','dark:border-sky-700','text-sky-700','dark:text-sky-300','font-semibold'];
+function routeViews(){
+  const destination=location.hash.slice(1),view=destination==='progress'?'progress':['plan','strategies','simulator','optimizer'].includes(destination)?'plan':'accounts';
+  document.getElementById('dashboard-view').classList.toggle('hidden',view!=='accounts');
+  document.getElementById('plan-view').classList.toggle('hidden',view!=='plan');
+  document.getElementById('progress-view').classList.toggle('hidden',view!=='progress');
+  document.querySelectorAll('.nav-link').forEach(link=>{const active=link.hash==='#'+view;NAV_ACTIVE_CLASSES.forEach(name=>link.classList.toggle(name,active));if(active)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');});
+  document.getElementById('settings-menu').open=false;
+  if(destination==='optimizer')document.getElementById('optimizer').open=true;
+  if(view==='progress')progressPage?.refresh();
+  requestAnimationFrame(()=>{if(['accounts','plan','progress',''].includes(destination))window.scrollTo({top:0});else document.getElementById(destination)?.scrollIntoView({block:'start'});});
 }
-window.addEventListener('hashchange',()=>setActiveNav(location.hash==='#progress'?'progress':location.hash.slice(1)));
-
-if (navSections.length && "IntersectionObserver" in window) {
-  const spy = new IntersectionObserver(
-    (entries) => {
-      const visible = entries
-        .filter((entry) => entry.isIntersecting)
-        .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-      if (visible) setActiveNav(visible.target.id);
-    },
-    { rootMargin: "-40% 0px -50% 0px", threshold: [0, 0.25, 0.5, 0.75, 1] }
-  );
-  navSections.forEach((sec) => spy.observe(sec));
-}
+window.addEventListener('hashchange',routeViews);
 
 // PWA SW registration (enables offline app-shell caching)
 if ("serviceWorker" in navigator) {
@@ -2346,4 +2111,6 @@ if (footerYear) footerYear.textContent = new Date().getFullYear();
 
 // ====== BOOT ======
 progressPage=new ProgressPage({getStore:()=>tracking,getCards:()=>cloudCards});
+payoffPlan=new PayoffPlan({getCards:()=>tracking?window.__latestCards:[]});
+routeViews();
 initFirebase();
