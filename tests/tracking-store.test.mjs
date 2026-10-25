@@ -4,6 +4,8 @@ import { TrackingStore, revisionOf, decryptEvent } from "../src/tracking-store.m
 import { memoryOutbox } from "../src/outbox.mjs";
 import { createAccount } from "../src/account-model.mjs";
 import { decryptAccount } from "../src/account-crypto.mjs";
+import { restoreBackup } from "../src/account-tools.mjs";
+import { BACKUP_FORMAT } from "../src/backup.mjs";
 const namespace="artifacts/test/users/owner";
 const key=await crypto.subtle.generateKey({name:"AES-GCM",length:256},false,["encrypt","decrypt"]);
 const account=createAccount({name:"Private",creditLimit:1000,availableCredit:200,apr:12});
@@ -44,4 +46,24 @@ test("linked transfers commit both accounts together and fees increase total bal
  const old=structuredClone(docs.get(`${namespace}/cards/${source.id}`));
  await store.enqueue({...source,_revision:revisionOf(old)},sourceAfter,'transfer',{amountCents:1,feeCents:0,other:{id:target.id,base:'stale',after:targetAfter}});await store.flush();
  assert.deepEqual(docs.get(`${namespace}/cards/${source.id}`),old);assert.equal((await store.pending())[0].status,'conflict');
+});
+test("unchanged edits skip history and oversized encrypted records fail before entering the outbox",async()=>{
+ const {store}=setup();const view=await store.enqueue(null,account,'add');await store.flush();
+ assert.equal(await store.enqueue(view,{...account,updatedAt:'2026-10-25T12:00:00.000Z'},'edit'),null);
+ await assert.rejects(store.enqueue(view,{...account,note:'changed'},'edit',{note:'x'.repeat(32768)}),/storage limit/);
+ assert.equal((await store.pending()).length,0);
+});
+test("a complete backup restores into an empty account under a new key and namespace",async()=>{
+ const source=setup();const original=await source.store.enqueue(null,account,'add');await source.store.flush();
+ const eventPath=`${namespace}/cards/${original.id}/events/${original._revision}`;
+ const event=await decryptEvent(source.docs.get(eventPath),key,eventPath);
+ const backup={format:BACKUP_FORMAT,version:1,accounts:[{id:original.id,account,events:[event]}]};
+ const target=setup(),newNamespace='artifacts/test/users/new-owner';const newKey=await crypto.subtle.generateKey({name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+ const store=new TrackingStore({namespace:newNamespace,key:newKey,adapter:target.store.adapter,outbox:target.outbox});
+ await restoreBackup(store,backup,[]);await store.flush();
+ const path=`${newNamespace}/cards/${original.id}`,raw=target.docs.get(path);
+ assert.deepEqual(await decryptAccount(raw,newKey,path),account);await assert.rejects(decryptAccount(raw,key,path));
+ const count=target.docs.size;
+ await restoreBackup(store,backup,[{...account,id:original.id,_revision:revisionOf(raw)}]);await store.flush();assert.equal(target.docs.size,count);
+ assert.equal((await store.pending()).length,0);
 });

@@ -4,6 +4,7 @@ export async function historyPage(store,id,cursors={},server=false) {
   for(const folder of ["events","restored"]){
     if(cursors[folder]===false){next[folder]=false;continue;}
     const page=await store.adapter.history(path,cursors[folder]??null,40,folder,server);
+    store.active();
     for(const row of page.rows){result.push(await decryptEvent(row.data,store.key,`${path}/${folder}/${row.id}`));store.active();}
     next[folder]=page.more?page.cursor:false;more ||= page.more;fromCache ||= page.fromCache;
   }

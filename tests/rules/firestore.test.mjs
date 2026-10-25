@@ -1,7 +1,7 @@
 import { before,after,beforeEach,test } from "node:test";
 import { readFile } from "node:fs/promises";
 import { initializeTestEnvironment,assertSucceeds,assertFails } from "@firebase/rules-unit-testing";
-import { doc,setDoc,getDoc,deleteDoc,writeBatch } from "firebase/firestore";
+import { doc,setDoc,getDoc,getDocs,collection,deleteDoc,writeBatch } from "firebase/firestore";
 let env;
 const path="artifacts/demo-pdt/users/owner/cards/card";
 const card=(revision,purging=false)=>({v:2,iv:"AAAAAAAAAAAAAAAA",data:"A".repeat(24),revision,purging});
@@ -61,4 +61,10 @@ test("two linked account updates and their events can commit in one atomic trans
  const create=writeBatch(db);create.set(doc(db,target),card('target-first'));create.set(doc(db,`${target}/events/target-first`),event('target-first','absent'));await assertSucceeds(create.commit());
  const transfer=writeBatch(db);for(const [p,previous] of [[path,'first'],[target,'target-first']]){transfer.set(doc(db,p),card('transfer'));transfer.set(doc(db,`${p}/events/transfer`),event('transfer',previous));}
  await assertSucceeds(transfer.commit());
+});
+test("purge can remove history across multiple bounded batches",async()=>{
+ await env.withSecurityRulesDisabled(async context=>{const db=context.firestore(),batch=writeBatch(db);batch.set(doc(db,path),card('purge',true));for(let i=0;i<420;i++)batch.set(doc(db,`${path}/events/event-${i}`),event(`event-${i}`,'absent'));await batch.commit();});
+ const db=env.authenticatedContext('owner').firestore();const records=await getDocs(collection(db,`${path}/events`));
+ for(let index=0;index<records.docs.length;index+=200){const batch=writeBatch(db);records.docs.slice(index,index+200).forEach(row=>batch.delete(row.ref));await assertSucceeds(batch.commit());}
+ await assertSucceeds(deleteDoc(doc(db,path)));
 });

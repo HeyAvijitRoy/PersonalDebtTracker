@@ -29,15 +29,19 @@ const optionalDate=value=>value==null||value===""?null:dateOnly(value);
 const optionalMoney=value=>value==null||value===""?null:monetary(value);
 function statement(value){
   if(value==null)return null;record(value);
+  if(Object.keys(value).some(key=>!['id','openingDate','closingDate','dueDate','balance','avoidInterestAmount','avoidInterestObservedAt','grace','priorPaid','cutoff','handled'].includes(key)))throw new TypeError("Unrecognized statement fields. Update the app before editing.");
   const id=text(value.id,80,"statement ID");if(!/^[A-Za-z0-9_-]+$/.test(id))throw new TypeError("Invalid statement ID.");
-  const closingDate=optionalDate(value.closingDate),dueDate=optionalDate(value.dueDate);
+  const openingDate=optionalDate(value.openingDate),closingDate=optionalDate(value.closingDate),dueDate=optionalDate(value.dueDate);
+  if(openingDate&&closingDate&&openingDate>closingDate)throw new TypeError("Statement opening date follows closing date.");
   if(closingDate&&dueDate&&dueDate<closingDate)throw new TypeError("Due date precedes statement closing date.");
   if(typeof (value.handled??false)!=="boolean")throw new TypeError("Invalid statement status.");
-  return {id,closingDate,dueDate,balance:optionalMoney(value.balance),avoidInterestAmount:optionalMoney(value.avoidInterestAmount),avoidInterestObservedAt:timestamp(value.avoidInterestObservedAt),
+  return {id,openingDate,closingDate,dueDate,balance:optionalMoney(value.balance),avoidInterestAmount:optionalMoney(value.avoidInterestAmount),avoidInterestObservedAt:timestamp(value.avoidInterestObservedAt),
     grace:choice(value.grace??"unknown",["unknown","active","inactive"],"grace status"),priorPaid:choice(value.priorPaid??"unknown",["unknown","yes","no"],"prior statement status"),cutoff:text(value.cutoff??"",80,"payment cutoff"),handled:value.handled??false};
 }
 function promotion(value){
   if(value==null)return null;record(value);
+  if(Object.keys(value).some(key=>!['type','endDate','startDate','balance','postApr','note'].includes(key)))throw new TypeError("Unrecognized promotion fields. Update the app before editing.");
+  if(value.startDate&&value.endDate&&value.endDate<value.startDate)throw new TypeError("Promotion end date precedes its start date.");
   return {type:choice(value.type??"unknown",["zero","deferred","unknown"],"promotion type"),endDate:optionalDate(value.endDate),startDate:optionalDate(value.startDate),balance:optionalMoney(value.balance),postApr:value.postApr==null||value.postApr===""?null:aprToBasisPoints(value.postApr)/100,note:text(value.note??"",500,"promotion note")};
 }
 

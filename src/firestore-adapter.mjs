@@ -1,4 +1,4 @@
-import { doc,runTransaction,getDocs,getDocsFromServer,collection,query,orderBy,limit,startAfter,writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { doc,runTransaction,getDocs,getDocsFromServer,collection,query,orderBy,limit,startAfter,writeBatch } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
 
 export function firestoreAdapter(db) {
   return {

@@ -9,15 +9,16 @@ export function drawChart(container,rows,{title,format=value=>money(value),value
  container.replaceChildren();container.append(element("h3",title,"font-semibold"));
  if(!rows.length){container.append(element("p","No observations available.","tracker-help"));return;}
  const width=760,height=260,pad=55;const values=rows.map(value);const max=Math.max(1,...values),min=Math.min(0,...values);
+ container.append(element('p',`Scale: ${format(min)} to ${format(max)}`,'tracker-help'));
  const times=rows.map(row=>Date.parse(row.key??row.date+"T00:00:00Z"));const first=Math.min(...times),last=Math.max(...times);
  const x=index=>last===first?width/2:pad+(times[index]-first)/(last-first)*(width-pad*2);
  const y=index=>height-pad-(values[index]-min)/(max-min)*(height-pad*2);
  const svg=svgElement("svg",{viewBox:`0 0 ${width} ${height}`,role:"img","aria-label":`${title}. Recorded observations; dashed connections are visual guides only.`});
  svg.append(svgElement("title",{},title),svgElement("line",{x1:pad,y1:height-pad,x2:width-pad,y2:height-pad,stroke:"currentColor",opacity:.4}));
- if(rows.length>1)svg.append(svgElement("polyline",{points:rows.map((_,i)=>`${x(i)},${y(i)}`).join(" "),fill:"none",stroke:"#0284c7","stroke-width":2,"stroke-dasharray":"5 5"}));
- rows.forEach((row,index)=>{const dot=svgElement("circle",{cx:x(index),cy:y(index),r:4,fill:"#0284c7",tabindex:0,"aria-label":`${row.date}: ${format(values[index])}. ${row.description??""}`});dot.append(svgElement("title",{},`${row.date}: ${format(values[index])} ${row.description??""}`));svg.append(dot);});
- svg.append(svgElement("text",{x:pad,y:20,fill:"currentColor","font-size":12},format(max)),svgElement("text",{x:pad,y:height-15,fill:"currentColor","font-size":12},rows[0].date),svgElement("text",{x:width-pad,y:height-15,fill:"currentColor","font-size":12,"text-anchor":"end"},rows.at(-1).date));
+ if(rows.length>1)svg.append(svgElement("polyline",{points:rows.map((_,i)=>`${x(i)},${y(i)}`).join(" "),fill:"none",stroke:"#0284c7","stroke-width":2,"stroke-dasharray":"5 5","vector-effect":"non-scaling-stroke"}));
+ rows.forEach((row,index)=>{const dot=svgElement("circle",{cx:x(index),cy:y(index),r:6,fill:"#0284c7",tabindex:0,"aria-label":`${row.date}: ${format(values[index])}. ${row.description??""}`});dot.append(svgElement("title",{},`${row.date}: ${format(values[index])} ${row.description??""}`));svg.append(dot);});
  container.append(svg);
+ const dates=element('div',null,'flex justify-between text-xs mt-2');dates.append(element('span',rows[0].date),element('span',rows.at(-1).date));container.append(dates);
 }
 export class ProgressPage {
  constructor({getStore,getCards}){
@@ -26,7 +27,7 @@ export class ProgressPage {
   document.getElementById('progress-refresh')?.addEventListener('click',()=>{this.cache.clear();this.refresh();});
   window.addEventListener('hashchange',()=>this.route());this.route();
  }
- clear(){this.sequence++;this.cache.clear();for(const id of ['progress-results','progress-account'])document.getElementById(id)?.replaceChildren();}
+ clear(){this.sequence++;this.cache.clear();for(const id of ['progress-results','progress-account'])document.getElementById(id)?.replaceChildren();for(const id of ['progress-from','progress-through']){const input=document.getElementById(id);if(input)input.value='';}}
  route(){const active=location.hash==='#progress';document.getElementById('dashboard-view')?.classList.toggle('hidden',active);document.getElementById('progress-view')?.classList.toggle('hidden',!active);if(active)this.refresh();}
  async refresh(){
   if(location.hash!=='#progress')return;

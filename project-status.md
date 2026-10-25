@@ -8,6 +8,24 @@ Legend: ✅ shipped to `main` (live) · 🚧 on a branch, not yet merged ·
 
 ---
 
+## 2026-10-25
+
+### Account tracking stages 2-7 - `feature/account-tracking-progress` (local only)
+
+- Implemented encrypted snapshot/history transactions, revision conflicts,
+  an encrypted offline outbox, and owner-only immutable-history rules.
+- Added calculated available-credit entry, dated observations/corrections,
+  freshness filters, archive/issuer status, Undo and bounded permanent purge.
+- Added complete JSON history backup/restore, stable-identity deduplication,
+  safe snapshot/history CSV exports, and user-scoped UI preferences.
+- Added manual statement/promotion reminders, optional payment records, atomic
+  linked transfers, provisional adjustments, and explicit interest scenarios.
+- Added the Progress page with comparable balance KPIs, observation graphs,
+  accessible tables, comparison bars, utilization/limit views, and milestones.
+- Verified with synthetic browser and local Firestore emulator checks; real
+  Google sign-in, live rules, real-account sync, and hosting remain rollout checks.
+- Deployment remains unperformed; see `docs/tracking-release.md`.
+
 ## 2026-10-24
 
 ### Account tracking foundation - `feature/account-tracking-progress` (local only)

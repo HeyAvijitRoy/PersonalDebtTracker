@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import vm from "node:vm";
 import { readFile } from "node:fs/promises";
 import { SessionScope } from "../src/session-scope.mjs";
-import { revisionOf } from "../src/tracking-store.mjs";
+import { revisionOf,safeId } from "../src/tracking-store.mjs";
 
 const source = await readFile(new URL("../app.js",import.meta.url),"utf8");
 const listenerSource = source.slice(source.indexOf("function setupFirestoreListener("),source.indexOf("// ====== HELPERS ======"));
@@ -12,7 +12,7 @@ function harness() {
   const pending = [];
   const renders = [];
   const state = {
-    sessionScope:new SessionScope(),userId:"owner",cryptoKey:{},tracking:null,cloudCards:[],revisionOf,
+    sessionScope:new SessionScope(),userId:"owner",cryptoKey:{},tracking:null,cloudCards:[],revisionOf,safeId,
     unsubscribe:null,db:{},appId:"project",editingId:null,firstSnapshotReceived:true,
     window:{__latestCards:[]},
     collection:()=>({}),

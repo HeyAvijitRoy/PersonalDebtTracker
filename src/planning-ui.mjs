@@ -16,7 +16,7 @@ export async function showPlanning(store,card,context){
  const {dialog,body}=trackingDialog(`${card.name} - statement and promotion references`);
  body.append(element("p","Optional manual references. No minimum-payment tracking, automatic interest-start date, or bank-verified payment status.","tracker-help"));
  const form=element("form");const statement=card.statement,promo=card.promotion;
- const closing=field(form,"Statement closing date","date",statement?.closingDate),due=field(form,"Payment due date","date",statement?.dueDate),balance=field(form,"Statement balance ($)","number",statement?.balance);
+ const opening=field(form,"Statement opening date (optional)","date",statement?.openingDate),closing=field(form,"Statement closing date","date",statement?.closingDate),due=field(form,"Payment due date","date",statement?.dueDate),balance=field(form,"Statement balance ($)","number",statement?.balance);
  const avoidance=field(form,"Issuer-displayed pay-to-avoid-interest amount ($), optional","number",statement?.avoidInterestAmount);
  const grace=field(form,"Purchase grace status (user-reported)","select",statement?.grace??"unknown",[["unknown","Unknown"],["active","Reported active"],["inactive","Reported inactive"]]);
  const prior=field(form,"Prior statement paid in full by its deadline?","select",statement?.priorPaid??"unknown",[["unknown","Unknown"],["yes","Yes, user-reported"],["no","No, user-reported"]]);
@@ -29,11 +29,13 @@ export async function showPlanning(store,card,context){
  const start=field(form,"Promotion start date","date",promo?.startDate),end=field(form,"Promotion end date","date",promo?.endDate),promoBalance=field(form,"Promotional balance reference ($)","number",promo?.balance),postApr=field(form,"Post-promotion APR reference (%)","number",promo?.postApr),note=field(form,"Promotion terms / notes (one reference; list other offers here)","text",promo?.note);
  formAction(form,"Save statement and promotion references",async()=>{
   const now=new Date().toISOString();
-  const hasStatement=closing.value||due.value||balance.value||avoidance.value;
+  const hasStatement=opening.value||closing.value||due.value||balance.value||avoidance.value;
   const newCycle=closing.value?statement?.closingDate!==closing.value:statement?.dueDate!==due.value;
+  const avoidanceAmount=avoidance.value?moneyToCents(avoidance.value)/100:null;
+  const avoidanceDate=avoidanceAmount==null?null:newCycle||statement?.avoidInterestAmount!==avoidanceAmount?now:statement?.avoidInterestObservedAt??now;
   const after=readAccount({...context.trackingFields(card),updatedAt:now,rateBasis:rateBasis.value,interestScenario:scenario.checked,
-   statement:hasStatement?{id:!newCycle&&statement?statement.id:crypto.randomUUID(),closingDate:closing.value||null,dueDate:due.value||null,balance:balance.value||null,avoidInterestAmount:avoidance.value||null,avoidInterestObservedAt:avoidance.value?now:null,grace:grace.value,priorPaid:prior.value,cutoff:cutoff.value,handled:handled.checked}:null,
-   promotion:end.value||start.value||promoBalance.value||postApr.value||note.value?{type:type.value,startDate:start.value||null,endDate:end.value||null,balance:promoBalance.value||null,postApr:postApr.value||null,note:note.value}:null,
+   statement:hasStatement?{id:!newCycle&&statement?statement.id:crypto.randomUUID(),openingDate:opening.value||null,closingDate:closing.value||null,dueDate:due.value||null,balance:balance.value||null,avoidInterestAmount:avoidanceAmount,avoidInterestObservedAt:avoidanceDate,grace:grace.value,priorPaid:prior.value,cutoff:cutoff.value,handled:handled.checked}:null,
+   promotion:type.value!=='unknown'||end.value||start.value||promoBalance.value||postApr.value||note.value?{type:type.value,startDate:start.value||null,endDate:end.value||null,balance:promoBalance.value||null,postApr:postApr.value||null,note:note.value}:null,
   });await context.save(card,after,"statement");dialog.close();
  });body.append(form,element("p",interestStatus(card),"tracker-help"));
  if(statement?.avoidInterestAmount!=null)body.append(element("p",`Issuer amount recorded: ${money(statement.avoidInterestAmount)} on ${statement.avoidInterestObservedAt?.slice(0,10)??"unknown date"}. This reference is not automatically reduced after payments.`,"tracker-help"));
@@ -44,7 +46,7 @@ export async function showPlanning(store,card,context){
   for(const record of paymentRecords(events)){
    const row=element("div",null,"tracker-history-row");row.append(element("p",`${money(record.details.amountCents/100)} | ${record.details.date} | ${record.details.status}`));
    const status=field(row,"Update recorded payment status","select",record.details.status,["scheduled","pending","posted","failed","reversed","corrected"].map(v=>[v,v]));
-   row.append(button("Save record status",async()=>{try{const current=context.getCard(card.id);await context.save(current,{...context.trackingFields(current),updatedAt:new Date().toISOString()},"payment",{...record.details,status:status.value,applied:false});dialog.close();}catch(error){row.append(element("p",error.message));}}));body.append(row);
+   row.append(button("Save record status",async()=>{try{if(status.value!=='scheduled'&&record.details.date>localDate())throw new Error('Only a scheduled record can have a future payment date.');const current=context.getCard(card.id);await context.save(current,{...context.trackingFields(current),updatedAt:new Date().toISOString()},"payment",{...record.details,status:status.value,applied:false});dialog.close();}catch(error){row.append(element("p",error.message));}}));body.append(row);
   }
  }catch{if(dialog.isConnected)body.append(element("p","Payment history unavailable; reconnect to review linked records.","tracker-help"));}
 }

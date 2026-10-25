@@ -42,7 +42,7 @@ export async function makeBackup(store,cards){
  const accounts=[];
  if((await store.pending()).length)throw new Error("Sync or resolve local drafts before exporting a full backup.");
  for(const card of cards){store.active();accounts.push({id:card.id,account:fieldsOf(card),events:await allHistory(store,card.id,{server:true})});}
- return validateBackup({format:BACKUP_FORMAT,version:1,createdAt:new Date().toISOString(),accounts});
+ store.active();return validateBackup({format:BACKUP_FORMAT,version:1,createdAt:new Date().toISOString(),accounts});
 }
 export function historyCSV(accounts){
  const rows=[["accountId","name","eventId","recordedAt","effectiveDate","type","balance","apr","creditLimit","entryMethod"]];

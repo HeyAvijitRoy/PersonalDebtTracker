@@ -1,5 +1,6 @@
 import { readAccount } from "./account-model.mjs";
 import { sealJSON, openJSON, decryptAccount, encryptTrackingAccount } from "./account-crypto.mjs";
+import { readEvent } from "./event-model.mjs";
 
 export const revisionOf = raw => !raw ? "absent" : raw.v===2 ? raw.revision : `legacy:${raw.iv}:${raw.data}`;
 export const fieldsOf = view => Object.fromEntries(Object.entries(view).filter(([key])=>key!=="id"&&!key.startsWith("_")));
@@ -11,7 +12,7 @@ export const cardPath = (namespace,id) => `${namespace}/cards/${safeId(id)}`;
 export async function decryptEvent(raw,key,path) {
   const event = await openJSON({v:1,iv:raw.iv,data:raw.data},key,path,32768);
   if (event.schemaVersion!==1 || event.id!==raw.revision || !event.after || typeof event.recordedAt!=="string") throw new Error("Unrecognized history event.");
-  return {...event,before:event.before?readAccount(event.before):null,after:readAccount(event.after)};
+  return readEvent(event);
 }
 
 export class TrackingStore {
@@ -37,9 +38,16 @@ export class TrackingStore {
       const id=`${Date.now().toString(36).padStart(10,"0")}-${crypto.randomUUID()}`;const accountId=safeId(view?.id??crypto.randomUUID());
       const normalized=readAccount(fieldsOf(after));
       const prior=view?.name?readAccount(fieldsOf(view)):null;
-      if(prior && type==="edit" && JSON.stringify(prior)===JSON.stringify(normalized)) return null;
-      const pending=await this.pending();
+      const comparable=account=>{const {updatedAt,...values}=account;return JSON.stringify(values);};
+      if(prior && type==="edit" && comparable(prior)===comparable(normalized)) return null;
+      const pending=await this.outbox.list(this.namespace);
       const operation={id,accountId,base:view?view._revision??"legacy-missing":"absent",after:normalized,type,details,recordedAt:new Date().toISOString()};
+      // Reject records that cannot fit server bounds before claiming that a
+      // local draft was saved. UTF-8 size can exceed character-count limits.
+      const path=cardPath(this.namespace,accountId);
+      await encryptTrackingAccount(normalized,key,path,id);
+      if(type==='restore-history')await sealJSON(details.event,key,`${path}/restored/${safeId(details.event.id)}`,32768);
+      else await sealJSON({schemaVersion:1,id,accountId,type,details,recordedAt:operation.recordedAt,before:prior,after:normalized},key,`${path}/events/${id}`,32768);
       const envelope=await sealJSON(operation,key,`${this.namespace}/outbox/${id}`,65536);
       this.active();
       await this.outbox.put({key:`${this.namespace}/${id}`,namespace:this.namespace,id,order:Math.max(Date.now(),...pending.map(row=>row.order+1)),status:"pending",envelope});

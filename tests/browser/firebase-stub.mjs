@@ -11,14 +11,15 @@ export const getRedirectResult=async()=>null;
 export const signOut=async()=>callback(null);
 `;
 export const firestore = `
-const docs=globalThis.__syntheticDocs=new Map();const listeners=[];
+const docs=globalThis.__syntheticDocs=new Map(JSON.parse(sessionStorage.getItem("synthetic-cloud")??"[]"));const listeners=[];
 const ref=(path)=>({path});
 export const getFirestore=()=>({});
 export const enableIndexedDbPersistence=async()=>{};
 export const collection=(_db,...parts)=>ref(parts.join('/'));
 export const doc=(db,...parts)=>ref(parts.length?parts.join('/'):db.path+'/'+crypto.randomUUID());
 const snapshot=(path)=>({id:path.split('/').at(-1),ref:ref(path),exists:()=>docs.has(path),data:()=>structuredClone(docs.get(path))});
-function emit(){for(const listener of listeners){if(listener.active)queueMicrotask(()=>listener.fn({docs:[...docs.keys()].filter(path=>path.startsWith(listener.path+'/')&&path.split('/').length===listener.path.split('/').length+1).map(snapshot),metadata:{fromCache:false}}));}}
+function emit(){sessionStorage.setItem("synthetic-cloud",JSON.stringify([...docs]));for(const listener of listeners){if(listener.active)queueMicrotask(()=>listener.fn({docs:[...docs.keys()].filter(path=>path.startsWith(listener.path+'/')&&path.split('/').length===listener.path.split('/').length+1).map(snapshot),metadata:{fromCache:false}}));}}
+globalThis.__syntheticEmit=emit;
 export const getDoc=async reference=>snapshot(reference.path);
 export const setDoc=async(reference,value)=>{docs.set(reference.path,structuredClone(value));emit();};
 export const deleteDoc=async reference=>{docs.delete(reference.path);emit();};

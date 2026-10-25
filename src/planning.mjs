@@ -17,9 +17,9 @@ export function paymentRecords(events){
  for(const event of [...events].sort((a,b)=>a.recordedAt.localeCompare(b.recordedAt)||a.id.localeCompare(b.id)))if(event.type==="payment"&&event.details?.paymentId)records.set(event.details.paymentId,event);
  return [...records.values()];
 }
-export function statementRemainder(card,events){
+export function statementRemainder(card,events,today=localDate()){
  if(card.statement?.balance==null)return null;
- const paid=paymentRecords(events).filter(event=>event.details.statementId===card.statement.id&&event.details.status==="posted").reduce((sum,event)=>sum+event.details.amountCents,0);
+ const paid=paymentRecords(events).filter(event=>event.details.statementId===card.statement.id&&event.details.status==="posted"&&event.details.date<=today).reduce((sum,event)=>sum+event.details.amountCents,0);
  return Math.max(0,moneyToCents(card.statement.balance)-paid)/100;
 }
 export function reminders(card,today=localDate(),warningDays=7){

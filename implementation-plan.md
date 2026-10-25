@@ -23,8 +23,9 @@ or exact interest-start inference are included. Stage 6 adds the dedicated Progr
 page with date/account selectors, comparable balance KPIs, dated balance graphs,
 accessible tables, account comparison bars, aligned utilization/limit graphs, and
 derived milestones. Missing/one-point/basis-change history is handled explicitly.
-Stage 7 verification and release preparation remain. No live cloud rules or
-deployment have been changed.
+Stage 7 local verification and release preparation are complete as of 2026-10-25.
+See `docs/tracking-release.md` for checks, security boundaries, and the remaining
+production rollout. No live cloud rules or deployment have been changed.
 
 ## Goal and scope
 
@@ -566,7 +567,7 @@ manual. Update README and dated status entries only as stages are completed.
   with a refresh-required message once migration starts. Keep older account data
   readable, and do not roll back to a client that drops new encrypted fields.
 - Verify deployed rules and a real authenticated sync separately from local source
-  and emulator checks. No deployment, push, or new features are part of this plan.
+  and emulator checks. Local verification does not perform a push or deployment.
 
 ## Review baseline
 

@@ -1,0 +1,49 @@
+import { chromium } from "playwright";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { syntheticPage } from "./harness.mjs";
+const browser=await chromium.launch({headless:true});
+try{
+ const {context,page,errors}=await syntheticPage(browser);
+ const password='synthetic-passphrase';const name='<img src=x onerror=window.__xss=1>';
+ const synced=()=>page.waitForFunction(()=>document.querySelector('#sync-status')?.textContent.includes('No local drafts'));
+ await page.locator('#lock-pass1').fill(password);await page.locator('#lock-pass2').fill(password);await page.locator('#lock-setup-btn').click();await page.locator('#main-app:not(.hidden)').waitFor();
+ async function add(label,limit,available,apr){await page.locator('#card-name').fill(label);await page.locator('#limit').fill(String(limit));await page.locator('#available-credit').fill(String(available));await page.locator('#apr').fill(String(apr));await page.locator('#submit-btn').click();await page.waitForFunction(()=>document.getElementById('card-name').value==='');await synced();}
+ const card=()=>page.locator('.debt-card').filter({has:page.getByRole('heading',{name,exact:true})});
+ await add(name,5000,4000,18);assert.equal(await page.locator('#card-list img').count(),0);assert.equal(await page.evaluate(()=>globalThis.__xss),undefined);
+ await page.locator('#utilization-targets').fill('10');await page.locator('#save-utilization-targets').click();await card().getByText('Pay $500.00',{exact:true}).waitFor();
+ await page.locator('#utilization-targets').fill('80, 50, 30');await page.locator('#save-utilization-targets').click();
+ await page.evaluate(()=>globalThis.__syntheticOffline=true);await card().locator('.inline-edit-btn').click();await page.locator('[data-field="availableCredit"]').fill('4200');await page.locator('.save-inline-btn').click();
+ await page.waitForFunction(()=>window.__latestCards[0]?._pending===true);
+ const stored=await page.evaluate(()=>new Promise((resolve,reject)=>{const request=indexedDB.open('pdt-encrypted-outbox',1);request.onsuccess=()=>{const read=request.result.transaction('operations').objectStore('operations').getAll();read.onsuccess=()=>resolve(JSON.stringify(read.result));read.onerror=reject;};request.onerror=reject;}));assert.equal(stored.includes(name),false);
+ await page.reload();await page.locator('#lock-pass').fill(password);await page.locator('#lock-unlock-btn').click();await page.locator('#main-app:not(.hidden)').waitFor();await synced();assert.equal(await page.locator('#total-debt').textContent(),'$800.00');
+ await page.evaluate(()=>globalThis.__syntheticOffline=true);await card().locator('.inline-edit-btn').click();await page.locator('[data-field="availableCredit"]').fill('4300');await page.locator('.save-inline-btn').click();await page.waitForFunction(()=>window.__latestCards[0]?._pending===true);
+ await page.evaluate(async password=>{
+  const {decryptAccount,encryptTrackingAccount,sealJSON}=await import('/src/account-crypto.mjs');
+  const entries=[...__syntheticDocs];const [metaPath,meta]=entries.find(([path])=>path.endsWith('/meta/crypto'));
+  const salt=Uint8Array.from(atob(meta.salt),c=>c.charCodeAt(0));const base=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveKey']);
+  const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:210000,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+  const [path,raw]=entries.find(([path])=>path.includes('/cards/')&&!path.includes('/events/'));const before=await decryptAccount(raw,key,path);const after={...before,balance:900,availableCredit:4100};const revision='remote-'+crypto.randomUUID();const eventPath=path+'/events/'+revision;
+  __syntheticDocs.set(path,await encryptTrackingAccount(after,key,path,revision));
+  const event={schemaVersion:1,id:revision,accountId:path.split('/').at(-1),type:'observation',details:{},recordedAt:new Date().toISOString(),before,after};
+  __syntheticDocs.set(eventPath,{...await sealJSON(event,key,eventPath,32768),v:2,revision,previous:raw.revision});__syntheticEmit();
+  globalThis.__syntheticOffline=false;dispatchEvent(new Event('online'));
+ },password);
+ await page.getByText('Review all draft and latest fields',{exact:true}).waitFor();await page.getByRole('button',{name:'Apply my draft to latest',exact:true}).click();await synced();assert.equal(await page.locator('#total-debt').textContent(),'$700.00');
+ await add('Transfer Target',2000,1500,0);await card().getByRole('button',{name:'Record transfer',exact:true}).click();
+ await page.getByLabel('Principal moved ($)',{exact:true}).fill('200');await page.getByLabel('Transfer fee ($)',{exact:true}).fill('10');await page.getByLabel('Apply provisional balance changes to both accounts',{exact:true}).check();await page.getByRole('button',{name:'Record linked transfer',exact:true}).click();await page.locator('dialog').waitFor({state:'hidden'});await synced();assert.equal(await page.locator('#total-debt').textContent(),'$1,210.00');
+ const download=page.waitForEvent('download');await page.locator('button[onclick="exportData(\'json\')"]').first().click();const backup=JSON.parse(await readFile(await (await download).path(),'utf8'));const docsBefore=await page.evaluate(()=>__syntheticDocs.size);
+ await page.locator('#import-csv-input').setInputFiles({name:'backup.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(backup))});await page.getByRole('button',{name:'Restore reviewed backup',exact:true}).click();await synced();assert.equal(await page.evaluate(()=>__syntheticDocs.size),docsBefore,'Restore must deduplicate existing events');
+ await card().locator('.delete-btn').click();await page.locator('.tracker-undo').getByRole('button',{name:'Undo',exact:true}).click();await synced();await card().waitFor();
+ const target=page.locator('.debt-card').filter({has:page.getByRole('heading',{name:'Transfer Target',exact:true})});const targetId=await target.locator('.delete-btn').getAttribute('data-id');await target.locator('.delete-btn').click();
+ await page.waitForFunction(id=>![...__syntheticDocs.keys()].some(path=>path.includes('/cards/'+id)),targetId,{timeout:20000});
+ await page.getByRole('link',{name:'Progress',exact:true}).click();await page.locator('#progress-results svg').first().waitFor();await page.locator('#theme-toggle').click();await page.setViewportSize({width:390,height:844});
+ await page.goBack();await page.locator('#dashboard-view').waitFor();await page.goForward();await page.locator('#progress-view').waitFor();
+ await page.locator('#progress-results circle').first().focus();await page.keyboard.press('Tab');
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:'test-results/progress-mobile-dark.png',fullPage:true});
+ await page.getByRole('link',{name:'Accounts',exact:true}).click();await card().getByRole('button',{name:'View history',exact:true}).click();await page.locator('dialog').waitFor();await page.keyboard.press('Escape');await page.locator('dialog').waitFor({state:'hidden'});
+ await page.setViewportSize({width:320,height:750});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Narrow mobile overflow');
+ await page.locator('#sign-out-btn').click();assert.equal(await page.locator('#main-app').isVisible(),false);assert.equal((await page.locator('body').textContent()).includes(name),false);assert.deepEqual(errors,[]);
+ console.log('Recovery browser passed: XSS text, encrypted offline reload, conflict review, atomic fee transfer, backup deduplication, Undo/purge, dark mobile, and sign-out clearing.');
+ await context.close();
+}finally{await browser.close();}

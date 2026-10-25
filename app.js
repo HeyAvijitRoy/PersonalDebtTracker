@@ -1,7 +1,7 @@
 import { decryptAccount } from "./src/account-crypto.mjs";
 import { moneyToCents, aprToBasisPoints } from "./src/money.mjs";
 import { SessionScope } from "./src/session-scope.mjs";
-import { TrackingStore,revisionOf,fieldsOf,cardPath } from "./src/tracking-store.mjs";
+import { TrackingStore,revisionOf,fieldsOf,cardPath,safeId } from "./src/tracking-store.mjs";
 import { indexedOutbox } from "./src/outbox.mjs";
 import { firestoreAdapter } from "./src/firestore-adapter.mjs";
 import { makeObservation,localDate } from "./src/observations.mjs";
@@ -11,10 +11,13 @@ import { BACKUP_FORMAT,validateBackup,csvCell } from "./src/backup.mjs";
 import { showPlanning,showPayment,showTransfer } from "./src/planning-ui.mjs";
 import { scenarioCost,reminders } from "./src/planning.mjs";
 import { ProgressPage } from "./src/progress-ui.mjs";
+import { preferences } from "./src/preferences.mjs";
 const sessionScope = new SessionScope();
 let tracking=null,cloudCards=[],pendingRows=[],viewSequence=0;
 let cleanupRunning=false;
 let progressPage=null;
+let uiPreferences=preferences();
+let unreadableRecords=0;
 
 // ====== UI ELEMENTS ======
 const form = document.getElementById("debt-form");
@@ -202,7 +205,7 @@ function toast(message, duration = 1800) {
 }
 
 // ====== FIREBASE ======
-import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
 import {
   getAuth,
   onAuthStateChanged,
@@ -211,7 +214,7 @@ import {
   signInWithRedirect,
   getRedirectResult,
   signOut,
-} from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+} from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
 import {
   getFirestore,
   collection,
@@ -220,7 +223,7 @@ import {
   getDoc,
   setDoc,
   enableIndexedDbPersistence,
-} from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+} from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
 
 // Load config from env.js
 const firebaseConfig = window.__FIREBASE_CONFIG;
@@ -355,6 +358,10 @@ function showLockUnlock() {
 // Called once the key is in memory: hide the lock screen, show loading, and
 // start the (decrypting) Firestore listener.
 function enterAppAfterUnlock() {
+  try{uiPreferences=preferences(JSON.parse(localStorage.getItem(`pdt-preferences:${appId}:${userId}`)??'{}'));}catch{uiPreferences=preferences();}
+  document.getElementById('utilization-targets').value=uiPreferences.targets.join(', ');
+  document.getElementById('stale-days').value=uiPreferences.staleDays;
+  document.getElementById('promotion-warning-days').value=uiPreferences.warningDays;
   const generation=sessionScope.generation,uid=userId,key=cryptoKey;
   tracking?.close();
   tracking=new TrackingStore({namespace:`artifacts/${appId}/users/${uid}`,key,
@@ -387,6 +394,7 @@ async function refreshTrackingView() {
   window.__latestCards=[...view.values()].filter(card=>!card.deletedAt);
   renderAll(window.__latestCards);
   renderSyncStatus();
+  const notice=document.getElementById('data-quality-notice');if(notice)notice.textContent=unreadableRecords?`${unreadableRecords} account(s) could not be read. Totals are incomplete; update the app or restore a valid backup. No records were changed.`:'';
   cleanupDeletedAccounts().catch(()=>{});
 }
 
@@ -414,11 +422,14 @@ function renderSyncStatus() {
     const current=cloudCards.find(c=>c.id===op.accountId);
     text.textContent=row.error==="rules"?`${op.after.name}: server permissions/rules need attention; draft retained.`:row.status==="conflict"?`${op.after.name}: draft balance ${fmtMoney(op.after.balance)}; latest balance ${current?fmtMoney(current.balance):"account removed"}.`:op.after.name+": pending connection.";
     line.append(text);
+    if(row.status==='conflict'){
+      const details=document.createElement('details');details.className='tracker-details';const title=document.createElement('summary');title.textContent='Review all draft and latest fields';const values=document.createElement('pre');values.style.whiteSpace='pre-wrap';values.textContent=JSON.stringify({draft:op.after,linkedDraft:op.details?.other??null,latest:current?fieldsOf(current):null,linkedLatest:op.details?.other?cloudCards.find(card=>card.id===op.details.other.id)??null:null},null,2);details.append(title,values);line.append(details);
+    }
     if(row.status==="conflict"&&op.type!=="transfer"){
       const apply=document.createElement("button");apply.className="tracker-button";apply.textContent="Apply my draft to latest";
       apply.onclick=async()=>{const store=tracking;if(!current||!store)return;try{await store.discard(op.accountId);await store.enqueue(current,op.after,"conflict-resolution",op.details);store.flush().catch(()=>{});}catch{showModal("Not saved","Could not apply the draft. Please try again.");}};line.append(apply);
     }
-    const discard=document.createElement("button");discard.className="tracker-button";discard.textContent="Discard this account's drafts";
+    const discard=document.createElement("button");discard.className="tracker-button";discard.textContent="Discard this account and linked drafts";
     discard.onclick=()=>tracking?.discard(op.accountId).catch(()=>showModal("Error","Could not discard the draft."));line.append(discard);box.append(line);
   }
   const retry=document.createElement("button");retry.className="tracker-button";retry.textContent="Retry sync";retry.onclick=()=>tracking?.flush().catch(()=>{});box.append(retry);
@@ -499,6 +510,7 @@ lockUnlockForm?.addEventListener("submit", async (e) => {
 
 function clearUnlockedState() {
   progressPage?.clear();
+  unreadableRecords=0;
   tracking?.close();tracking=null;cloudCards=[];pendingRows=[];viewSequence++;
   document.querySelectorAll(".tracker-undo").forEach(element=>element.remove());
   document.querySelectorAll(".tracking-dialog").forEach(dialog=>{dialog.close();dialog.remove();});
@@ -509,7 +521,9 @@ function clearUnlockedState() {
   window.__latestCards = [];
   firstSnapshotReceived = false;
   editingId = null;
-  for (const id of ["card-list", "avalanche-list", "snowball-list", "expensive-list", "fico-hints", "bt-output", "sim-output","upcoming-reminders"]) {
+  editingBase = null;
+  searchQuery='';if(accountSearchInput)accountSearchInput.value='';
+  for (const id of ["card-list", "avalanche-list", "snowball-list", "expensive-list", "fico-hints", "bt-output", "sim-output","upcoming-reminders","sync-status","data-quality-notice"]) {
     document.getElementById(id)?.replaceChildren();
   }
   for (const element of [totalDebtDisplay, totalCreditLineDisplay, totalMonthlyInterestDisplay, totalYearlyInterestDisplay]) {
@@ -621,12 +635,14 @@ function setupFirestoreListener(uid) {
       if (!sessionScope.current(generation) || userId !== uid || cryptoKey !== listenerKey) return;
       const ticket = sessionScope.startRead();
       const decrypted = [];
+      let rejected=0;
       for (const d of snapshot.docs) {
         try {
           const fields = await decryptAccount(d.data(), listenerKey,`artifacts/${appId}/users/${uid}/cards/${d.id}`);
           if (!sessionScope.accepts(ticket) || userId !== uid || cryptoKey !== listenerKey) return;
-          decrypted.push({ ...fields,id:d.id,_revision:revisionOf(d.data()),_purging:d.data().purging??false });
+          decrypted.push({ ...fields,id:safeId(d.id),_revision:revisionOf(d.data()),_purging:d.data().purging??false });
         } catch (err) {
+          rejected++;
           // A doc we can't decrypt (e.g. wrong key) is skipped rather than
           // crashing the whole render.
           console.error("[Crypto] Could not decrypt card", d.id, err);
@@ -635,6 +651,7 @@ function setupFirestoreListener(uid) {
       if (!sessionScope.accepts(ticket) || userId !== uid || cryptoKey !== listenerKey) return;
       window.__latestCards = decrypted;
       cloudCards=decrypted;
+      unreadableRecords=rejected;
       if (editingId && !window.__latestCards.find((c) => c.id === editingId))
         editingId = null;
 
@@ -720,7 +737,7 @@ function rankByInterestPer100(cards) {
 
 // FICO optics
 function computeFicoHints(cards) {
-  const thresholds = [80, 50, 30];
+  const thresholds = uiPreferences.targets;
   let over80 = 0,
     over50 = 0,
     over30 = 0;
@@ -730,6 +747,7 @@ function computeFicoHints(cards) {
     sumTo30 = 0;
 
   for (const c of cards) {
+    if(c.status==='closed')continue;
     const bal = +c.balance || 0,
       lim = +c.creditLimit || 0;
     if (!lim || bal <= 0) continue;
@@ -762,9 +780,10 @@ function computeFicoHints(cards) {
   }
   nudges.sort((a, b) => a.dollarsToDrop - b.dollarsToDrop);
 
-  const { debt, limit } = computeTotals(cards);
-  const to50Overall = Math.max(0, debt - 0.5 * limit);
-  const to30Overall = Math.max(0, debt - 0.3 * limit);
+  const { limit } = computeTotals(cards);
+  const openDebt=cards.filter(card=>card.status!=='closed').reduce((sum,card)=>sum+card.balance,0);
+  const to50Overall = limit>0?Math.max(0, openDebt - 0.5 * limit):null;
+  const to30Overall = limit>0?Math.max(0, openDebt - 0.3 * limit):null;
 
   return {
     over80,
@@ -780,6 +799,7 @@ function computeFicoHints(cards) {
 }
 
 function renderCardFicoHint(card) {
+  if(card.status==='closed')return '<p class="tracker-help">Issuer-closed account: outstanding balance remains tracked; no open-credit utilization target is suggested.</p>';
   const nudge = computeFicoHints([card]).nudges[0];
   const message = nudge
     ? `<span class="font-semibold text-sky-700 dark:text-sky-400">Pay ${fmtMoney(nudge.dollarsToDrop)}</span> to reach ${nudge.nextThreshold}% utilization.`
@@ -964,8 +984,9 @@ function sortCardsGeneric(cards) {
         vb = per100B;
         break;
       case "monthlyInterest":
-        va = monthlyInterest(+a.balance || 0, +a.apr || 0);
-        vb = monthlyInterest(+b.balance || 0, +b.apr || 0);
+        va = scenarioCost(a);
+        vb = scenarioCost(b);
+        if(va===null||vb===null)return va===vb?0:va===null?1:-1;
         break;
       default:
         va = 0;
@@ -1084,7 +1105,7 @@ function renderCards(cards) {
       "h-2.5 rounded-full transition-all " +
       (pct <= 30 ? "bg-emerald-500" : pct <= 50 ? "bg-amber-500" : "bg-rose-500");
   }
-  if (overallUtilText) overallUtilText.textContent = `${util.toFixed(1)}%`;
+  if (overallUtilText) overallUtilText.textContent = limit>0?`${util.toFixed(1)}%`:'Unavailable';
   if (accountsMeta)
     accountsMeta.textContent = cards.length
       ? `Accounts: ${cards.length}`
@@ -1143,7 +1164,7 @@ function renderCards(cards) {
             <h3 class="name-fit text-base font-semibold text-gray-900 dark:text-gray-100" title="${escapeHtml(card.name)}">
               ${escapeHtml(card.name)}
             </h3>
-            <div class="mt-1">${riskBadge(utilization)}</div>
+            <div class="mt-1">${creditLimit>0?riskBadge(utilization):'<span class="tracker-help">Utilization unavailable: no positive limit</span>'}</div>
             <div class="mt-1 grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-gray-600 dark:text-gray-400">
               <p>Balance: <span class="font-semibold text-gray-900 dark:text-gray-100">${fmtMoney(
                 balance
@@ -1164,17 +1185,8 @@ function renderCards(cards) {
               <p>Monthly cost scenario: <span class="font-semibold text-gray-900 dark:text-gray-100">${monthlyInt===null?'Not included':fmtMoney(monthlyInt)}</span></p>
             </div>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Hypothetical monthly cost per $100 at entered APR: ${card.rateBasis&&card.rateBasis!=='single'?'Unavailable':fmtMoney(interestPer100(apr))}</p>
-            <p class="tracker-help">${card.entryMethod==='availableCredit'?'Estimated from available credit: '+fmtMoney(card.availableCredit):'Direct balance entry'} ? ${card.effectiveDate?'Observed '+escapeHtml(card.effectiveDate):'Observation date not recorded'}${card._pending?' ? Pending sync':''}</p>
+            <p class="tracker-help">${card.entryMethod==='availableCredit'?'Estimated from available credit: '+fmtMoney(card.availableCredit):'Direct balance entry'} | ${card.effectiveDate?(card.provisional?'Provisional as of ':'Observed ')+escapeHtml(card.effectiveDate):'Observation date not recorded'}${card._pending?' | Pending sync':''}${card.provisional?' | Refresh issuer inputs to reconcile.':''}</p>
             <p class="tracker-help">${card.archived?'Archived (still included in totals). ':''}${card.status==='closed'?'Issuer-closed; outstanding balance remains tracked. ':''}${!card.effectiveDate||(Date.now()-Date.parse(card.effectiveDate+'T00:00:00'))/86400000>=Number(document.getElementById('stale-days')?.value||7)?'Balance needs an update.':''}</p>
-            <div class="tracker-actions">
-              <button class="tracker-button" data-account-action="planning" data-id="${card.id}">Statement & planning</button>
-              <button class="tracker-button" data-account-action="payment" data-id="${card.id}">Record payment</button>
-              <button class="tracker-button" data-account-action="transfer" data-id="${card.id}">Record transfer</button>
-              <button class="tracker-button" data-account-action="history" data-id="${card.id}">View history</button>
-              <button class="tracker-button" data-account-action="archive" data-id="${card.id}">${card.archived?'Unarchive':'Archive'}</button>
-              <button class="tracker-button" data-account-action="status" data-id="${card.id}">${card.status==='closed'?'Mark issuer-open':'Mark issuer-closed'}</button>
-            </div>
-            <button class="refresh-observation tracker-button" data-id="${card.id}">Record current values as observed today</button>
             <div class="mt-2 flex items-center gap-2">
               <span class="text-xs text-gray-500 dark:text-gray-400">Quick pay:</span>
               <button
@@ -1207,14 +1219,12 @@ function renderCards(cards) {
 
         <div class="mt-3">
           <div class="flex items-center justify-between mb-1">
-            <p class="text-sm text-gray-700 dark:text-gray-300">Utilization: <span class="font-semibold">${utilization.toFixed(
-              1
-            )}%</span></p>
+            <p class="text-sm text-gray-700 dark:text-gray-300">Estimated utilization: <span class="font-semibold">${creditLimit>0?utilization.toFixed(1)+'%':'Unavailable'}</span></p>
             <p class="text-xs text-gray-400 dark:text-gray-500">View: ${utilView.toUpperCase()}</p>
           </div>
 
           ${
-            utilView === "pie"
+            creditLimit<=0?'':utilView === "pie"
               ? donut(utilization)
               : `
             <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
@@ -1226,6 +1236,16 @@ function renderCards(cards) {
           `
           }
           ${renderCardFicoHint(card)}
+            <div class="tracker-actions">
+              <button class="tracker-button" data-account-action="planning" data-id="${card.id}">Statement & planning</button>
+              <button class="tracker-button" data-account-action="payment" data-id="${card.id}">Record payment</button>
+              <button class="tracker-button" data-account-action="transfer" data-id="${card.id}">Record transfer</button>
+              <button class="tracker-button" data-account-action="history" data-id="${card.id}">View history</button>
+              <button class="tracker-button" data-account-action="archive" data-id="${card.id}">${card.archived?'Unarchive':'Archive'}</button>
+              <button class="tracker-button" data-account-action="status" data-id="${card.id}">${card.status==='closed'?'Mark issuer-open':'Mark issuer-closed'}</button>
+            </div>
+            <button class="refresh-observation tracker-button" data-id="${card.id}">Record current values as observed today</button>
+
         </div>
       `;
     } else {
@@ -1308,12 +1328,12 @@ function donut(util) {
   const trackColor = isDark ? "#374151" : "#e5e7eb";
   return `
     <div class="flex items-center gap-3">
-      <svg width="56" height="56" viewBox="0 0 48 48" role="img" aria-label="Utilization: ${pct.toFixed(1)}%">
+      <svg width="56" height="56" viewBox="0 0 48 48" role="img" aria-label="Utilization: ${util.toFixed(1)}%">
         <circle cx="24" cy="24" r="${r}" stroke="${trackColor}" stroke-width="6" fill="none"/>
         <circle cx="24" cy="24" r="${r}" stroke="${color}" stroke-width="6" fill="none"
                 stroke-dasharray="${filled} ${remaining}" transform="rotate(-90 24 24)"/>
       </svg>
-      <span class="text-sm text-gray-700 dark:text-gray-300">${pct.toFixed(1)}%</span>
+      <span class="text-sm text-gray-700 dark:text-gray-300">${limit>0?util.toFixed(1)+'%':'Unavailable'}</span>
     </div>
   `;
 }
@@ -1412,7 +1432,7 @@ function renderFicoHints(cards) {
       '<button type="button" onclick="focusAddForm()" class="text-gray-500 dark:text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 hover:underline transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded">Add accounts to see utilization thresholds and “nudge” amounts.</button>';
     return;
   }
-  const { util } = computeTotals(cards);
+  const { util,limit } = computeTotals(cards);
   const {
     over80,
     over50,
@@ -1456,12 +1476,8 @@ function renderFicoHints(cards) {
       ${thresholdTile("&gt;30%", over30, sumTo30)}
     </div>
     <div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400 flex flex-wrap gap-x-4 gap-y-1">
-      <span>To reach 50% overall: <span class="font-semibold text-gray-700 dark:text-gray-300">${fmtMoney(
-        to50Overall
-      )}</span></span>
-      <span>To reach 30% overall: <span class="font-semibold text-gray-700 dark:text-gray-300">${fmtMoney(
-        to30Overall
-      )}</span></span>
+      <span>To reach 50% overall: <span class="font-semibold text-gray-700 dark:text-gray-300">${to50Overall===null?'Unavailable':fmtMoney(to50Overall)}</span></span>
+      <span>To reach 30% overall: <span class="font-semibold text-gray-700 dark:text-gray-300">${to30Overall===null?'Unavailable':fmtMoney(to30Overall)}</span></span>
     </div>
   `;
   box.appendChild(summary);
@@ -1492,7 +1508,7 @@ function renderFicoHints(cards) {
     const ok = document.createElement("p");
     ok.className = "text-sm text-emerald-700 dark:text-emerald-400 mt-2";
     ok.textContent =
-      "No tracked cards are above the 30% planning target.";
+      "No open tracked cards exceed the selected planning targets.";
     box.appendChild(ok);
   }
 }
@@ -1552,7 +1568,8 @@ function downloadFile(name, type, data) {
 async function exportData(format = "csv") {
   if(!tracking||!cryptoKey){showModal('Locked','Sign in and unlock before exporting.');return;}
   if(format==='json'||format==='history'){
-    try{const backup=await makeBackup(tracking,cloudCards.filter(c=>!c.deletedAt));
+    if(unreadableRecords){showModal('Export unavailable','A complete backup cannot be created while accounts are unreadable. Resolve the data warning first.');return;}
+    try{const store=tracking;const backup=await makeBackup(store,cloudCards.filter(c=>!c.deletedAt));store.active();if(store!==tracking)return;backup.settings=uiPreferences;
       downloadFile(format==='json'?'debt-tracker-backup.json':'debt-tracker-history.csv',format==='json'?'application/json':'text/csv',format==='json'?JSON.stringify(backup,null,2):historyCSV(backup.accounts));
       toast('Downloaded backup contains decrypted personal financial data. Store it privately.');
     }catch(error){showModal('Export unavailable',error.message);}return;
@@ -1684,14 +1701,16 @@ importCsvInput?.addEventListener("change", async () => {
     return;
   }
 
+  const importStore=tracking;
   if(file.size>10*1024*1024){showModal('Import failed','Choose a backup smaller than 10 MB.');return;}
   const text = await file.text();
+  if(!importStore||tracking!==importStore||!importStore.isActive())return;
   try{const raw=JSON.parse(text);if(raw?.format===BACKUP_FORMAT){
     const backup=validateBackup(raw);const {dialog,body}=trackingDialog('Review backup restore');
     body.append(uiElement('p',`${backup.accounts.length} accounts and ${backup.accounts.reduce((sum,row)=>sum+row.events.length,0)} history records. Existing conflicting accounts are skipped unless you explicitly replace them.`));
     for(const row of backup.accounts)body.append(uiElement('p',`${row.account.name}: ${fmtMoney(row.account.balance)}${cloudCards.some(c=>c.id===row.id)?' (already tracked)':''}`));
     const label=uiElement('label');const replace=uiElement('input');replace.type='checkbox';label.append(replace,document.createTextNode(' Replace current snapshots for matching account IDs'));body.append(label);
-    body.append(uiButton('Restore reviewed backup',async()=>{try{const result=await restoreBackup(tracking,backup,cloudCards,{replace:replace.checked});dialog.close();await refreshTrackingView();toast(`Restore queued: ${result.restored} accounts, ${result.skipped} conflicts skipped.`);}catch(error){showModal('Restore failed',error.message);}}));return;
+    body.append(uiButton('Restore reviewed backup',async()=>{try{const store=tracking;const result=await restoreBackup(store,backup,cloudCards,{replace:replace.checked});store.active();if(store!==tracking)return;uiPreferences=preferences(backup.settings);savePreferences();dialog.close();await refreshTrackingView();toast(`Restore queued: ${result.restored} accounts, ${result.skipped} conflicts skipped.`);}catch(error){showModal('Restore failed',error.message);}}));return;
   }}catch(error){if(text.includes('"format"')){showModal('Import failed',error.message);return;}}
 
   const isJson =
@@ -1700,6 +1719,7 @@ importCsvInput?.addEventListener("change", async () => {
     text.trim().startsWith("[") ||
     text.trim().startsWith("{");
   const { rows, errors } = isJson ? parseJson(text) : parseCsv(text);
+  if(rows.length>1000){showModal('Import failed','Import at most 1,000 accounts at a time.');return;}
 
   if (!rows.length) {
     showModal(
@@ -1717,6 +1737,7 @@ importCsvInput?.addEventListener("change", async () => {
   );
   let imported = 0;
   for (const row of rows) {
+    if(tracking!==importStore||!importStore.isActive())return;
     try {
       await saveTracked(null,makeObservation(null,{...row,entryMethod:'direct',effectiveDate:localDate()}).account,'import');
       imported++;
@@ -1850,7 +1871,17 @@ function correctObservation(id,event){
  }catch(error){showModal('Correction not saved',error.message);save.disabled=false;}};
  body.append(form);
 }
-for(const id of ['show-archived','stale-only','stale-days'])document.getElementById(id)?.addEventListener('change',()=>renderCards(window.__latestCards));
+function savePreferences(){
+ uiPreferences=preferences(uiPreferences);
+ try{localStorage.setItem(`pdt-preferences:${appId}:${userId}`,JSON.stringify(uiPreferences));}catch{}
+ document.getElementById('utilization-targets').value=uiPreferences.targets.join(', ');
+ document.getElementById('stale-days').value=uiPreferences.staleDays;
+ document.getElementById('promotion-warning-days').value=uiPreferences.warningDays;
+}
+document.getElementById('save-utilization-targets')?.addEventListener('click',()=>{
+ try{uiPreferences=preferences({...uiPreferences,targets:document.getElementById('utilization-targets').value.split(',').map(value=>value.trim())});savePreferences();renderAll(window.__latestCards);}catch(error){showModal('Invalid targets',error.message);}
+});
+for(const id of ['show-archived','stale-only','stale-days'])document.getElementById(id)?.addEventListener('change',()=>{try{uiPreferences=preferences({...uiPreferences,staleDays:Number(document.getElementById('stale-days').value)});savePreferences();renderCards(window.__latestCards);}catch(error){showModal('Invalid interval',error.message);}});
 function renderReminders(cards){
  const box=document.getElementById('upcoming-reminders');if(!box)return;box.replaceChildren();
  const days=Number(document.getElementById('promotion-warning-days')?.value)||7;
@@ -1860,7 +1891,7 @@ function renderReminders(cards){
  }
  if(!box.childNodes.length)box.textContent='No statement deadlines or approaching promotion dates recorded. Add them under Statement & planning on an account.';
 }
-document.getElementById('promotion-warning-days')?.addEventListener('change',()=>renderReminders(window.__latestCards));
+document.getElementById('promotion-warning-days')?.addEventListener('change',()=>{try{uiPreferences=preferences({...uiPreferences,warningDays:Number(document.getElementById('promotion-warning-days').value)});savePreferences();renderReminders(window.__latestCards);}catch(error){showModal('Invalid interval',error.message);}});
 if(document.getElementById('observation-date'))document.getElementById('observation-date').value=localDate();
 refreshEntry(form);
 
@@ -2064,17 +2095,17 @@ btRunBtn?.addEventListener("click", () => {
     <p>Total Transfer: <span class="font-semibold">${fmtMoney(
       result.totalTransfer
     )}</span></p>
-    <p>Monthly Interest Saved: <span class="font-semibold">${fmtMoney(
+    <p>Hypothetical monthly interest reduction: <span class="font-semibold">${fmtMoney(
       result.totalMonthlySaved
     )}</span></p>
-    <p>Intro Savings (months ${months}) vs Fees: <span class="font-semibold">${fmtMoney(
+    <p>Scenario over intro period (months ${months}) vs Fees: <span class="font-semibold">${fmtMoney(
     result.totalIntroSaved
   )} saved • ${fmtMoney(result.totalFees)} fees</span></p>
     <p class="${
       result.netIntroSavings >= 0
         ? "text-emerald-700 dark:text-emerald-400"
         : "text-rose-700 dark:text-rose-400"
-    }">Net Savings Over Intro: <span class="font-semibold">${fmtMoney(
+    }">Hypothetical net benefit over intro: <span class="font-semibold">${fmtMoney(
     result.netIntroSavings
   )}</span></p>
   `;
@@ -2150,8 +2181,8 @@ simRunBtn?.addEventListener("click", () => {
   hdr.className =
     "p-3 bg-white dark:bg-gray-900 rounded-md border border-gray-200 dark:border-gray-800";
   hdr.innerHTML = `
-    <p>Debt-free in: <span class="font-semibold">${durationText}</span> <span class="text-xs text-gray-500 dark:text-gray-400">(~${payoffDateText})</span></p>
-    <p>Total Interest Paid: <span class="font-semibold text-rose-700 dark:text-rose-400">${fmtMoney(
+    <p>Simulated payoff time: <span class="font-semibold">${durationText}</span> <span class="text-xs text-gray-500 dark:text-gray-400">(~${payoffDateText})</span></p>
+    <p>Simulated total interest: <span class="font-semibold text-rose-700 dark:text-rose-400">${fmtMoney(
       result.totalInterest
     )}</span></p>
   `;
@@ -2210,11 +2241,14 @@ const navSections = navLinks
   .filter(Boolean);
 
 function setActiveNav(id) {
+  if(location.hash==='#progress')id='progress';
   navLinks.forEach((link) => {
     const isActive = link.getAttribute("href") === `#${id}`;
     NAV_ACTIVE_CLASSES.forEach((c) => link.classList.toggle(c, isActive));
+    if(isActive)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');
   });
 }
+window.addEventListener('hashchange',()=>setActiveNav(location.hash==='#progress'?'progress':location.hash.slice(1)));
 
 if (navSections.length && "IntersectionObserver" in window) {
   const spy = new IntersectionObserver(

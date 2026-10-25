@@ -1,7 +1,7 @@
 # Personal Debt Tracker
 
-Track credit-card balances, see the true monthly (and yearly) interest burn, get
-FICO "threshold nudge" hints, simulate payoff timelines, and plan 0% balance
+Track estimated credit-card balances from limit and available credit, inspect
+balance history and Progress charts, compare hypothetical interest costs, simulate payoff timelines, and plan 0% balance
 transfers — in a clean, mobile-first web app where your data is **end-to-end
 encrypted in the browser** before it ever reaches Firestore.
 
@@ -37,7 +37,10 @@ encrypted in the browser** before it ever reaches Firestore.
 * **Google sign-in + Firestore sync** (offline-first via IndexedDB).
 * **Inline edit** in place (row expands to full-width inputs; *Enter* to save,
   *Esc* to cancel) with field-level validation.
-* **Quick ±$50 balance nudges** on each card for fast payment updates.
+* **Quick ±$50 balance adjustments** on each card, with encrypted history.
+* **Available-credit entry:** estimated balance is limit minus available credit;
+  direct entry remains available for legacy and over-limit exceptions.
+* **Dated history and corrections**, archive/restore, issuer status, and freshness filters.
 * **Search / filter** accounts by name; **undo delete** (8-second toast).
 * **Sort** by Name / APR / Balance / Utilization / Monthly Interest / Monthly Interest per $100
   (preference persisted).
@@ -47,8 +50,12 @@ encrypted in the browser** before it ever reaches Firestore.
   **Yearly Interest (Est.)** figure, plus an **overall utilization bar**.
 * **Per-card utilization** as **bar or donut** (toggle), risk badges
   (Healthy / Watch / Medium / High), and **0% APR** chips.
-* **FICO "threshold nudges":** cheapest dollars to drop under 30% / 50% / 80%
-  utilization, per-card and overall.
+* **Utilization targets:** per-card payment amounts below the progress bar, with
+  customizable planning targets. These are not promised credit-score breakpoints.
+* **Progress page:** overall/per-account balance trends, comparison KPIs, milestones,
+  accessible observation tables, and utilization/limit charts.
+* **Manual statement/promotion references:** dates, optional payment/transfer records,
+  and in-app reminders. No minimum-payment tracking or exact interest-start claims.
 
 ### 🧮 Planning tools
 * **Payoff strategies:** Debt Avalanche (highest APR) and Debt Snowball (lowest
@@ -61,7 +68,8 @@ encrypted in the browser** before it ever reaches Firestore.
 
 ### 🧰 Quality of life
 * **Dark mode** (persisted, no flash of wrong theme).
-* **Import** CSV **and** JSON; **Export** CSV / JSON.
+* **Import** legacy CSV/JSON and full backups; **Export** snapshot/history CSV or
+  full JSON backups retaining account IDs, history, and settings.
 * **PWA:** installable, offline-friendly (network-first service worker; Firestore
   queues writes offline and syncs when back online).
 * **Accessibility:** keyboard support, focus rings, ARIA labels, `aria-live`
@@ -88,16 +96,20 @@ encrypted in the browser** before it ever reaches Firestore.
 
 ```
 artifacts/{projectId}/users/{uid}/cards/{cardId}
+artifacts/{projectId}/users/{uid}/cards/{cardId}/events/{revision}
+artifacts/{projectId}/users/{uid}/cards/{cardId}/restored/{eventId}
 ```
 
-**Encrypted (all cards):**
+**New encrypted account snapshots:**
 
 ```json
-{ "v": 1, "iv": "<base64>", "data": "<base64-ciphertext>" }
+{ "v": 2, "iv": "<base64>", "data": "<base64-ciphertext>", "revision": "<id>", "purging": false }
 ```
 
-Cards are encrypted-only — the app writes and reads this envelope exclusively;
-malformed or unrecognized documents are rejected rather than shown.
+Legacy `{v:1,iv,data}` snapshots remain readable. New writes pair a version-2
+snapshot with an immutable encrypted event. Financial fields remain encrypted;
+revision/purge flags, record counts, and update-order identifiers are operational
+metadata. Malformed or unsupported records produce an incomplete-data warning.
 
 **Per-user crypto metadata:**
 
@@ -164,9 +176,7 @@ project admins / server backups cannot read card details.
 3. **Serve over HTTP** (not `file://`, so ES modules + the service worker work):
 
    ```bash
-   npx serve .
-   # or
-   python -m http.server 5173
+   npm start
    ```
 
 ### Rebuilding the CSS
@@ -175,10 +185,10 @@ Tailwind is **precompiled** to a static `styles.css` (committed to the repo).
 Rebuild it whenever you change markup or class names in `index.html` / `app.js`:
 
 ```bash
-npx tailwindcss@3.4.17 -c tailwind.config.js -i src/input.css -o styles.css --minify
+npm run build:css
 ```
 
-The content scanner reads `index.html` and `app.js`, so any class used there is
+The content scanner reads `index.html`, `app.js`, and runtime modules in `src/`, so any class used there is
 included. (The old Tailwind Play CDN was removed — it isn't production-grade and
 broke behind Cloudflare Rocket Loader.)
 
@@ -202,8 +212,9 @@ atomic snapshot/history writes, stale revisions, immutable history, and purge
 permissions against the local demo Firestore emulator. This never deploys rules.
 
 The next implementation stages are tracked in
-[`implementation-plan.md`](implementation-plan.md). The new available-credit
-forms and encrypted history are not enabled by the foundation stage.
+[`implementation-plan.md`](implementation-plan.md). Available-credit
+forms, encrypted history, and Progress page are implemented on the feature branch.
+Production rollout still requires the compatible rules and application deployment.
 
 ---
 
@@ -300,7 +311,11 @@ See [`project-plan.md`](project-plan.md) for the full phased plan and
 * [ ] Guest / local-only mode (try before sign-in)
 * [ ] Firebase App Check (reCAPTCHA v3)
 * [ ] Multi-currency support
-* [ ] Automated tests for the financial math + CI gates
+* [x] Automated calculation/crypto/session tests and CI gates
+
+For the current tracking implementation and rollout requirements, see
+[`implementation-plan.md`](implementation-plan.md) and
+[`docs/tracking-release.md`](docs/tracking-release.md).
 
 ---
 

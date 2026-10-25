@@ -16,7 +16,7 @@ test("deadlines and interest guidance never infer an exact interest-start date",
 });
 test("statement tracking uses latest linked payment status, not balance changes or scheduled payments",()=>{
  const card=readAccount({...account,statement:{id:"cycle",balance:800}});
- const row=(id,status,date)=>({id,recordedAt:date,type:"payment",details:{paymentId:"payment",statementId:"cycle",amountCents:20000,status}});
+ const row=(id,status,date)=>({id,recordedAt:date,type:"payment",details:{paymentId:"payment",statementId:"cycle",amountCents:20000,status,date:'2026-10-20'}});
  assert.equal(statementRemainder(card,[row('a','posted','2026-10-20')]),600);
  assert.equal(statementRemainder(card,[row('a','posted','2026-10-20'),row('b','reversed','2026-10-21')]),800);
  assert.equal(statementRemainder(card,[row('a','scheduled','2026-10-20')]),800);
