@@ -29,7 +29,14 @@
   .account-filters { @apply flex flex-wrap items-center gap-x-6 gap-y-3 mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 text-sm; }
   .account-filters > label { @apply py-1; }
   .account-toolbar { @apply flex flex-wrap items-center gap-2 mt-4 pt-3 border-t border-gray-200 dark:border-gray-700; }
+  .debt-card.account-needs-update { @apply border-amber-400 dark:border-amber-600; }
+  .account-badges { @apply flex flex-wrap items-center gap-2 mt-2; }
+  .account-update-badge { @apply inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold bg-amber-100 text-amber-900 dark:bg-amber-900/60 dark:text-amber-200; }
+  .account-pending-badge { @apply inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200; }
+  .account-freshness { @apply text-xs text-gray-500 dark:text-gray-400 mt-2; }
+  .account-freshness.account-freshness-warning { @apply rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 p-3; }
   .account-update { @apply px-3 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-sm font-medium; }
+  .account-update.account-update-needed { @apply bg-amber-700 hover:bg-amber-800 text-white dark:bg-amber-400 dark:hover:bg-amber-300 dark:text-gray-950; }
   .account-history { @apply px-3 py-2 rounded-lg text-sm text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-950/50; }
   .account-menu { @apply text-sm; }
   .account-menu summary { @apply cursor-pointer rounded-lg px-3 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800; }

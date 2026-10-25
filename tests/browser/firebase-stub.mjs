@@ -15,7 +15,8 @@ const docs=globalThis.__syntheticDocs=new Map(JSON.parse(sessionStorage.getItem(
 const ref=(path)=>({path});
 export const getFirestore=()=>({});
 export const initializeFirestore=()=>({});
-export const enableIndexedDbPersistence=async()=>{};
+export const persistentLocalCache=options=>options;
+export const persistentMultipleTabManager=()=>({});
 export const collection=(_db,...parts)=>ref(parts.join('/'));
 export const doc=(db,...parts)=>ref(parts.length?parts.join('/'):db.path+'/'+crypto.randomUUID());
 const snapshot=(path)=>({id:path.split('/').at(-1),ref:ref(path),exists:()=>docs.has(path),data:()=>structuredClone(docs.get(path))});
