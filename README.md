@@ -39,7 +39,7 @@ encrypted in the browser** before it ever reaches Firestore.
   *Esc* to cancel) with field-level validation.
 * **Quick ±$50 balance nudges** on each card for fast payment updates.
 * **Search / filter** accounts by name; **undo delete** (8-second toast).
-* **Sort** by Name / APR / Balance / Utilization / Interest per $100
+* **Sort** by Name / APR / Balance / Utilization / Monthly Interest / Monthly Interest per $100
   (preference persisted).
 
 ### 📊 Insight & visuals
@@ -51,8 +51,8 @@ encrypted in the browser** before it ever reaches Firestore.
   utilization, per-card and overall.
 
 ### 🧮 Planning tools
-* **Payoff strategies:** Debt Avalanche (highest APR), Debt Snowball (lowest
-  balance), and Most Expensive (interest per $100).
+* **Payoff strategies:** Debt Avalanche (highest APR) and Debt Snowball (lowest
+  balance), alongside an estimated monthly interest ranking by account.
 * **Payoff Schedule Simulator:** enter a monthly budget + strategy to get an
   estimated debt-free date, total interest paid, and payoff order.
 * **Balance-Transfer Optimizer:** pick a 0% target card, optionally cap its
@@ -244,7 +244,7 @@ Test locally against the new project before updating the production secrets.
 
 ## 🧭 Usage Notes
 
-* **Sort** by Name / APR / Balance / Utilization / Interest per $100 (persisted).
+* **Sort** by Name / APR / Balance / Utilization / Monthly Interest / Monthly Interest per $100 (persisted).
 * **Utilization View**: switch **Bar ↔ Donut** in the controls.
 * **Inline edit**: click ✏️ → fields expand; **Enter** saves, **Esc** cancels.
 * **Quick pay**: ±$50 buttons for fast balance updates; **Undo delete** toast.

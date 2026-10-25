@@ -681,6 +681,24 @@ function computeFicoHints(cards) {
   };
 }
 
+function renderCardFicoHint(card) {
+  const nudge = computeFicoHints([card]).nudges[0];
+  const message = nudge
+    ? `<span class="font-semibold text-sky-700 dark:text-sky-400">Pay ${fmtMoney(nudge.dollarsToDrop)}</span> to reach ${nudge.nextThreshold}% utilization.`
+    : +card.creditLimit > 0
+    ? computeCardUtilization(card) <= 30
+      ? "No threshold payment needed: utilization is already at or below 30%."
+      : "Within $0.01 of the next utilization threshold."
+    : "Add a credit limit to see the threshold payment amount.";
+
+  return `
+    <div class="mt-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+      <p class="text-xs font-medium text-gray-700 dark:text-gray-300">Cheapest “threshold nudges” (FICO optics)</p>
+      <p class="mt-1 text-sm text-gray-700 dark:text-gray-300">${message}</p>
+    </div>
+  `;
+}
+
 // Balance transfer planner
 function planBalanceTransfer(
   cards,
@@ -845,6 +863,10 @@ function sortCardsGeneric(cards) {
       case "interestPer100":
         va = per100A;
         vb = per100B;
+        break;
+      case "monthlyInterest":
+        va = monthlyInterest(+a.balance || 0, +a.apr || 0);
+        vb = monthlyInterest(+b.balance || 0, +b.apr || 0);
         break;
       default:
         va = 0;
@@ -1034,6 +1056,7 @@ function renderCards(cards) {
                 monthlyInt
               )}</span></p>
             </div>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Est. monthly interest per $100: ${fmtMoney(interestPer100(apr))}</p>
             <div class="mt-2 flex items-center gap-2">
               <span class="text-xs text-gray-500 dark:text-gray-400">Quick pay:</span>
               <button
@@ -1084,6 +1107,7 @@ function renderCards(cards) {
             </div>
           `
           }
+          ${renderCardFicoHint(card)}
         </div>
       `;
     } else {
@@ -1204,7 +1228,13 @@ function renderStrategy(cards, strategy) {
 
 function renderExpensive(cards) {
   if (!expensiveList) return;
-  const ranked = rankByInterestPer100(cards);
+  const ranked = cards
+    .filter(hasBalance)
+    .map((card) => ({
+      ...card,
+      monthlyCost: monthlyInterest(+card.balance || 0, +card.apr || 0),
+    }))
+    .sort((a, b) => b.monthlyCost - a.monthlyCost);
   expensiveList.innerHTML = "";
   if (!ranked.length && cards.length) {
     expensiveList.innerHTML =
@@ -1213,7 +1243,7 @@ function renderExpensive(cards) {
   }
   if (!ranked.length) {
     expensiveList.innerHTML =
-      '<button type="button" onclick="focusAddForm()" class="text-gray-500 dark:text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 hover:underline transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded">Add accounts to see per-$100 cost ranking.</button>';
+      '<button type="button" onclick="focusAddForm()" class="text-gray-500 dark:text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 hover:underline transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded">Add accounts to see estimated monthly interest by account.</button>';
     return;
   }
   ranked.slice(0, 6).forEach((r, i) => {
@@ -1225,14 +1255,14 @@ function renderExpensive(cards) {
         <span class="text-lg font-bold text-gray-600 dark:text-gray-400 w-6 shrink-0">${i + 1}.</span>
         <div class="ml-2 min-w-0">
           <p class="font-medium text-gray-900 dark:text-gray-100 break-words leading-snug">${escapeHtml(r.name)}</p>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">APR ${r.apr.toFixed(
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">APR ${(+r.apr || 0).toFixed(
             2
           )}% • Balance ${fmtMoney(r.balance)}</p>
         </div>
       </div>
       <span class="text-sm font-semibold text-rose-700 dark:text-rose-400 shrink-0">${fmtMoney(
-        r.per100
-      )}/$100</span>
+        r.monthlyCost
+      )}/mo</span>
     `;
     expensiveList.appendChild(row);
   });

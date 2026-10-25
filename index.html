@@ -563,7 +563,8 @@
                   <option value="apr">APR</option>
                   <option value="balance">Balance</option>
                   <option value="utilization" selected>Utilization</option>
-                  <option value="interestPer100">Interest per $100</option>
+                  <option value="interestPer100">Monthly Interest per $100</option>
+                  <option value="monthlyInterest">Monthly Interest</option>
                 </select>
                 <button
                   id="sort-dir"
@@ -682,11 +683,12 @@
               class="bg-gray-50 dark:bg-gray-800/60 p-5 rounded-lg shadow-sm border border-transparent dark:border-gray-800"
             >
               <h3 class="text-base font-semibold mb-3 text-gray-800 dark:text-gray-100">
-                Most Expensive Balances
+                Estimated Monthly Interest by Account
               </h3>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">Highest estimated monthly cost first, based on each balance and APR.</p>
               <div id="expensive-list" class="space-y-2">
                 <p class="text-gray-500 dark:text-gray-400">
-                  Add accounts to see per-$100 cost ranking.
+                  Add accounts to see estimated monthly interest by account.
                 </p>
               </div>
             </div>
