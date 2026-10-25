@@ -16,35 +16,55 @@ export class FirestoreWriteClient {
   }));
  }
  async transact(callback){
+  // Match the browser SDK: optimistic reads plus per-document preconditions,
+  // including verify writes for read-only documents. No BeginTransaction RPC.
   for(let attempt=0;attempt<3;attempt++){
-   this.reader.active();let transaction,finished=false;
+   this.reader.active();const reads=new Map();let committing=false;
    try{
-    ({transaction}=await this.call('beginTransaction',{options:{readWrite:{}}}));
-    if(typeof transaction!=='string'||!transaction)throw new Error('Firestore did not start a transaction. Your draft is retained.');
-    const writes=[];let writing=false;
+    const writes=new Map();let writing=false;
     const result=await callback({
      get:async path=>{
       if(writing)throw new Error('Transaction reads must precede writes.');
-      const name=this.name(path),rows=await this.call('batchGet',{documents:[name],transaction});
+      const name=this.name(path),rows=await this.call('batchGet',{documents:[name]});
       if(!Array.isArray(rows))throw new Error('Invalid transactional read response.');
       const found=rows.find(row=>row.found?.name===name),missing=rows.some(row=>row.missing===name);
       if(found&&missing)throw new Error('Inconsistent transactional read.');
-      if(found){const relative=path.slice(this.reader.namespace.length+1),folder=relative.slice(0,relative.lastIndexOf('/'));return this.reader.decode(found.found,folder).data;}
+      if(!found&&!missing)throw new Error('Firestore did not confirm whether the record exists.');
+      if(found&&(typeof found.found.updateTime!=='string'||!found.found.updateTime))throw new Error('Firestore did not return a document version.');
+      const precondition=found?{updateTime:found.found.updateTime}:{exists:false};
+      if(reads.has(name)&&JSON.stringify(reads.get(name))!==JSON.stringify(precondition)){const error=new Error('Document changed during the read.');error.code='aborted';throw error;}
+      reads.set(name,precondition);
       if(missing)return null;
-      throw new Error('Firestore did not confirm whether the record exists.');
+      const relative=path.slice(this.reader.namespace.length+1),folder=relative.slice(0,relative.lastIndexOf('/'));
+      return this.reader.decode(found.found,folder).data;
      },
-     set:(path,data)=>{writing=true;writes.push({update:{name:this.name(path),fields:this.fields(data)}});},
+     set:(path,data)=>{writing=true;const name=this.name(path);if(writes.has(name))throw new Error('Duplicate document write.');writes.set(name,{update:{name,fields:this.fields(data)}});},
     });
     this.reader.active();
-    // Replayed operations may already have an immutable event on the server.
-    // Their authenticated reads confirm completion; release the read transaction.
-    if(!writes.length){await this.call('rollback',{transaction});finished=true;this.reader.active();return result;}
-    const response=await this.call('commit',{transaction,writes});
+    const mutations=[...writes].map(([name,write])=>({...write,...(reads.has(name)?{currentDocument:reads.get(name)}:{})}));
+    for(const [name,precondition] of reads)if(!writes.has(name))mutations.push({verify:name,currentDocument:precondition});
+    if(!mutations.length)return result;
+    committing=true;const response=await this.call('commit',{writes:mutations});
     const results=response.writeResults??[];
-    if(!response.commitTime||!Array.isArray(results)||results.length!==writes.length)throw new Error('Save confirmation was incomplete. Your encrypted draft is retained for a safe retry.');
-    finished=true;this.reader.active();return result;
-   }catch(error){if(error.code!=='aborted'||attempt===2)throw error;}
-   finally{if(transaction&&!finished&&this.reader.isActive())await this.call('rollback',{transaction}).catch(()=>{});}
+    if(!response.commitTime||!Array.isArray(results)||results.length!==mutations.length)throw new Error('Save confirmation was incomplete. Your encrypted draft is retained for a safe retry.');
+    this.reader.active();return result;
+   }catch(error){
+    let retry=['aborted','failed-precondition','already-exists'].includes(error.code);
+    // Paired-history rules can reject a stale revision before Firestore reports
+    // its failed version precondition. Retry a denial only with server evidence
+    // that a read document actually changed; unchanged denials remain errors.
+    if(error.code==='permission-denied'&&committing&&reads.size&&attempt<2){
+     try{
+      const rows=await this.call('batchGet',{documents:[...reads.keys()]});
+      if(Array.isArray(rows))retry=[...reads].some(([name,version])=>{
+       const found=rows.find(row=>row.found?.name===name),missing=rows.some(row=>row.missing===name);
+       if(found&&typeof found.found.updateTime==='string')return version.updateTime!==found.found.updateTime;
+       return missing&&version.exists!==false;
+      });
+     }catch{}
+    }
+    if(!retry||attempt===2)throw error;
+   }
   }
  }
  async remove(paths){
