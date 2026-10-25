@@ -1,3 +1,12 @@
+## 2026-10-25 - Recover account loading after unlock
+
+- Extended authenticated HTTPS fallback to account and history reads; added an
+  account refresh/error panel and owner-scoped encrypted offline snapshots.
+- Fixed history queries to filter the encrypted envelope version before
+  descending document ordering; verified REST cursor behavior with the emulator.
+- Verified 55 unit checks, 10 emulator rule checks and three browser suites.
+  Service-worker cache v10. Local only; real signed-in retry remains to verify.
+
 # Project Status — Personal Debt Tracker
 
 A dated, reverse-chronological log of changes. **Newest entries go on top.**

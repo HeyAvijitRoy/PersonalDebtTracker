@@ -30,12 +30,13 @@ export const getDocFromServer=async reference=>{
 };
 export const setDoc=async(reference,value)=>{docs.set(reference.path,structuredClone(value));emit();};
 export const deleteDoc=async reference=>{docs.delete(reference.path);emit();};
-export const onSnapshot=(reference,fn)=>{const entry={path:reference.path,fn,active:true};listeners.push(entry);emit();return()=>entry.active=false;};
+export const onSnapshot=(reference,options,callback)=>{const fn=typeof options==='function'?options:callback;if(globalThis.__syntheticAccountsHang)return()=>{};const entry={path:reference.path,fn,active:true};listeners.push(entry);emit();return()=>entry.active=false;};
 export const runTransaction=async(_db,fn)=>{
  if(globalThis.__syntheticOffline){const error=new Error('Offline');error.code='unavailable';throw error;}
  const writes=[];const result=await fn({get:async reference=>snapshot(reference.path),set:(reference,value)=>writes.push([reference.path,value])});
  writes.forEach(([path,value])=>docs.set(path,structuredClone(value)));emit();return result;
 };
+export const where=()=>({kind:'where'});
 export const orderBy=(field,direction)=>({kind:'order',field,direction});export const limit=count=>({kind:'limit',count});export const startAfter=id=>({kind:'after',id});
 export const query=(reference,...constraints)=>({...reference,constraints});
 export const getDocs=async reference=>{

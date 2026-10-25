@@ -13,10 +13,10 @@ function harness() {
   const renders = [];
   const state = {
     sessionScope:new SessionScope(),userId:"owner",cryptoKey:{},tracking:null,cloudCards:[],revisionOf,safeId,
-    unsubscribe:null,db:{},appId:"project",editingId:null,firstSnapshotReceived:true,
+    accountReader:{},stopAccountReads:null,refreshAccounts:null,readCache:{write:async()=>{}},document:{getElementById:()=>null},setTimeout:()=>0,setInterval:()=>0,clearTimeout:()=>{},clearInterval:()=>{},unsubscribe:null,db:{},appId:"project",editingId:null,firstSnapshotReceived:true,
     window:{__latestCards:[]},
     collection:()=>({}),
-    onSnapshot:(_collection,callback,error)=>{next=callback;fail=error;return ()=>{};},
+    onSnapshot:(_collection,options,callback,error)=>{next=callback;fail=error;return ()=>{};},
     decryptAccount:()=>new Promise(resolve=>pending.push(resolve)),
     renderAll:cards=>renders.push(cards),
     console:{error:()=>{}},showModal:()=>{throw new Error("Stale session displayed an error.");},

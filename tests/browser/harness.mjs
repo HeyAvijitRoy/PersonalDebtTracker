@@ -8,6 +8,10 @@ export async function syntheticPage(browser){
    const state=await page.evaluate(()=>({enabled:globalThis.__syntheticRestMetadataEnabled,meta:[...globalThis.__syntheticDocs??[]].find(([path])=>path.endsWith('/meta/crypto'))?.[1]}));
    if(!state.enabled)return route.abort();
    if(route.request().headers().authorization!=='Bearer synthetic-token')return route.fulfill({status:403,contentType:'application/json',body:JSON.stringify({error:{status:'PERMISSION_DENIED'}})});
+   if(url.pathname.endsWith('/cards')) {
+    const documents=await page.evaluate(()=>[...globalThis.__syntheticDocs??[]].filter(([path])=>/\/cards\/[^/]+$/.test(path)).map(([path,data])=>({name:'projects/synthetic-project/databases/(default)/documents/'+path,fields:Object.fromEntries(Object.entries(data).map(([key,value])=>[key,typeof value==='string'?{stringValue:value}:typeof value==='boolean'?{booleanValue:value}:{integerValue:String(value)}]))})));
+    return route.fulfill({contentType:'application/json',headers:{'Access-Control-Allow-Origin':'*'},body:JSON.stringify({documents})});
+   }
    const meta=state.meta;
    if(!meta)return route.fulfill({status:404,contentType:'application/json',body:JSON.stringify({error:{status:'NOT_FOUND',message:'Document not found.'}})});
    return route.fulfill({contentType:'application/json',headers:{'Access-Control-Allow-Origin':'*'},body:JSON.stringify({fields:{v:{integerValue:String(meta.v)},salt:{stringValue:meta.salt},verifier:{mapValue:{fields:{iv:{stringValue:meta.verifier.iv},data:{stringValue:meta.verifier.data}}}}}})});

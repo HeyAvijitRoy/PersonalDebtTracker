@@ -2,6 +2,8 @@ import { before,after,beforeEach,test } from "node:test";
 import { readFile } from "node:fs/promises";
 import { initializeTestEnvironment,assertSucceeds,assertFails } from "@firebase/rules-unit-testing";
 import { doc,setDoc,getDoc,getDocs,collection,deleteDoc,writeBatch } from "firebase/firestore";
+import { createMockUserToken } from '@firebase/util';
+import { FirestoreReadClient } from '../../src/firestore-read.mjs';
 let env;
 const path="artifacts/demo-pdt/users/owner/cards/card";
 const card=(revision,purging=false)=>({v:2,iv:"AAAAAAAAAAAAAAAA",data:"A".repeat(24),revision,purging});
@@ -10,6 +12,14 @@ before(async()=>{env=await initializeTestEnvironment({projectId:"demo-pdt",fires
 after(async()=>{await env?.cleanup();});
 beforeEach(async()=>{await env.clearFirestore();});
 function paired(db,revision,previous="absent",purging=false){const batch=writeBatch(db);batch.set(doc(db,path),card(revision,purging));batch.set(doc(db,`${path}/events/${revision}`),event(revision,previous));return batch.commit();}
+test('HTTPS account listing and history cursors obey owner rules',async()=>{
+ const db=env.authenticatedContext('owner').firestore();await paired(db,'first');await paired(db,'second','first');
+ const reader=uid=>new FirestoreReadClient({projectId:'demo-pdt',uid:'owner',getUser:()=>({uid:'owner',getIdToken:async()=>createMockUserToken({sub:uid},'demo-pdt')}),fetcher:(url,options)=>fetch(url.replace('https://firestore.googleapis.com','http://127.0.0.1:8085'),options)});
+ const owner=reader('owner');const accounts=await owner.accounts();if(accounts.length!==1)throw new Error('Expected one owner account');
+ const page=await owner.history('card',null,1);if(page.rows[0].id!=='second')throw new Error('Expected descending history');
+ const next=await owner.history('card',page.cursor,1);if(next.rows[0].id!=='first')throw new Error('Expected cursor to skip previous event');
+ await assertFails(reader('other').accounts());await assertFails(reader('other').history('card'));
+});
 test("owner can atomically create/read a snapshot and history event",async()=>{
  const db=env.authenticatedContext("owner").firestore();await assertSucceeds(paired(db,"first"));
  await assertSucceeds(getDoc(doc(db,path)));await assertSucceeds(getDoc(doc(db,`${path}/events/first`)));

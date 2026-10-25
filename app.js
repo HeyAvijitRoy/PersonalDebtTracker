@@ -14,6 +14,10 @@ import { ProgressPage } from "./src/progress-ui.mjs";
 import { preferences } from "./src/preferences.mjs";
 import { loadLockMetadata } from "./src/lock-gate.mjs";
 import { fallbackAfter,fetchCryptoMetadata,metadataCache } from "./src/metadata-transport.mjs";
+import { FirestoreReadClient } from "./src/firestore-read.mjs";
+import { encryptedReadCache } from "./src/encrypted-read-cache.mjs";
+const readCache=encryptedReadCache();
+let accountReader=null,refreshAccounts=null,stopAccountReads=null;
 const sessionScope = new SessionScope();
 let tracking=null,cloudCards=[],pendingRows=[],viewSequence=0;
 let cleanupRunning=false;
@@ -402,9 +406,10 @@ function enterAppAfterUnlock() {
   document.getElementById('stale-days').value=uiPreferences.staleDays;
   document.getElementById('promotion-warning-days').value=uiPreferences.warningDays;
   const generation=sessionScope.generation,uid=userId,key=cryptoKey;
+  accountReader=new FirestoreReadClient({projectId:appId,uid,getUser:()=>auth.currentUser,isActive:()=>sessionScope.current(generation)&&userId===uid&&cryptoKey===key});
   tracking?.close();
   tracking=new TrackingStore({namespace:`artifacts/${appId}/users/${uid}`,key,
-    adapter:firestoreAdapter(db),outbox:indexedOutbox(),
+    adapter:firestoreAdapter(db,accountReader),outbox:indexedOutbox(),
     isActive:()=>sessionScope.current(generation)&&userId===uid&&cryptoKey===key,
     onChange:()=>{refreshTrackingView().catch(()=>{});},
   });
@@ -548,6 +553,8 @@ lockUnlockForm?.addEventListener("submit", async (e) => {
 });
 
 function clearUnlockedState() {
+  stopAccountReads?.();stopAccountReads=null;refreshAccounts=null;accountReader=null;
+  document.getElementById('account-connection')?.classList.add('hidden');
   lockRequest++;
   progressPage?.clear();
   unreadableRecords=0;
@@ -647,59 +654,59 @@ function initFirebase() {
 
 function setupFirestoreListener(uid) {
   if (unsubscribe) unsubscribe();
-  const generation = sessionScope.generation;
-  const listenerKey = cryptoKey;
-  const cardsCollection = collection(
-    db,
-    `artifacts/${appId}/users/${uid}/cards`
-  );
-  unsubscribe = onSnapshot(
-    cardsCollection,
-    async (snapshot) => {
-      if (!sessionScope.current(generation) || userId !== uid || cryptoKey !== listenerKey) return;
-      const ticket = sessionScope.startRead();
-      const decrypted = [];
-      let rejected=0;
-      for (const d of snapshot.docs) {
-        try {
-          const fields = await decryptAccount(d.data(), listenerKey,`artifacts/${appId}/users/${uid}/cards/${d.id}`);
-          if (!sessionScope.accepts(ticket) || userId !== uid || cryptoKey !== listenerKey) return;
-          decrypted.push({ ...fields,id:safeId(d.id),_revision:revisionOf(d.data()),_purging:d.data().purging??false });
-        } catch (err) {
-          rejected++;
-          // A doc we can't decrypt (e.g. wrong key) is skipped rather than
-          // crashing the whole render.
-          console.error("[Crypto] Could not decrypt card", d.id, err);
-        }
-      }
-      if (!sessionScope.accepts(ticket) || userId !== uid || cryptoKey !== listenerKey) return;
-      window.__latestCards = decrypted;
-      cloudCards=decrypted;
-      unreadableRecords=rejected;
-      if (editingId && !window.__latestCards.find((c) => c.id === editingId))
-        editingId = null;
-
-      if (!firstSnapshotReceived) {
-        firstSnapshotReceived = true;
-        appLoading?.classList.add("hidden");
-        mainApp?.classList.remove("hidden");
-      }
-
-      if(tracking)await refreshTrackingView();else renderAll(window.__latestCards);
-    },
-    (error) => {
-      console.error("[Firestore] onSnapshot error:", error);
-      // Ignore errors that arrive after sign-out (e.g. permission-denied as
-      // the listener tears down) — don't resurrect the data view.
-      if (!sessionScope.current(generation) || userId !== uid || cryptoKey !== listenerKey) return;
-      appLoading?.classList.add("hidden");
-      mainApp?.classList.remove("hidden");
-      showModal(
-        "Sync error",
-        "Lost connection to your data. Changes may not be up to date — try refreshing."
-      );
+  stopAccountReads?.();
+  const generation=sessionScope.generation,listenerKey=cryptoKey,reader=accountReader;
+  const namespace=`artifacts/${appId}/users/${uid}`;
+  const active=()=>sessionScope.current(generation)&&userId===uid&&cryptoKey===listenerKey;
+  let live=false,busy=false,stopped=false,remoteLoaded=false;
+  const panel=document.getElementById('account-connection');
+  const notice=message=>{if(!active())return;panel?.classList.toggle('hidden',!message);const label=document.getElementById('account-connection-message');if(label)label.textContent=message;};
+  async function apply(rows,{cached=false,rejected:cachedRejected=0}={}) {
+    if(!active()||stopped)return;
+    const ticket=sessionScope.startRead(),decrypted=[],valid=[];let rejected=cachedRejected;
+    for(const row of rows) {
+      try {
+        const fields=await decryptAccount(row.data,listenerKey,`${namespace}/cards/${row.id}`);
+        if(!active()||!sessionScope.accepts(ticket))return;
+        decrypted.push({...fields,id:safeId(row.id),_revision:revisionOf(row.data),_purging:row.data.purging??false});valid.push(row);
+      }catch{rejected++;}
     }
-  );
+    if(!active()||!sessionScope.accepts(ticket))return;
+    cloudCards=decrypted;window.__latestCards=decrypted;unreadableRecords=rejected;
+    if(editingId&&!decrypted.some(card=>card.id===editingId))editingId=null;
+    firstSnapshotReceived=true;appLoading?.classList.add('hidden');mainApp?.classList.remove('hidden');
+    if(tracking)await refreshTrackingView();else renderAll(decrypted);
+    if(!cached&&active()&&sessionScope.accepts(ticket))readCache.write(namespace,valid,rejected).catch(()=>{});
+  }
+  refreshAccounts=async()=>{
+    if(!active()||stopped||busy)return;
+    busy=true;notice('Refreshing encrypted account data...');
+    try {
+      const rows=await reader.accounts();
+      if(!active()||live||stopped)return;
+      remoteLoaded=true;await apply(rows);notice('Accounts loaded through HTTPS. Live sync is unavailable; refresh to check for updates. Changes remain pending until sync confirms them.');
+    }catch(error){
+      if(!active()||live||stopped)return;
+      if(!firstSnapshotReceived){
+        try{const cached=await readCache.read(namespace);if(cached&&active())await apply(cached.rows,{cached:true,rejected:cached.rejected});}catch{}
+      }
+      if(!active())return;
+      appLoading?.classList.add('hidden');
+      notice(`${firstSnapshotReceived?'Showing previously loaded data. ':''}${error.message}`);
+    }finally{busy=false;}
+  };
+  const timer=setTimeout(()=>{if(!live)refreshAccounts?.();},1500);
+  const interval=setInterval(()=>{if(!live&&document.visibilityState==='visible')refreshAccounts?.();},60000);
+  stopAccountReads=()=>{stopped=true;clearTimeout(timer);clearInterval(interval);};
+  const refreshButton=document.getElementById('account-refresh');if(refreshButton)refreshButton.onclick=()=>{live=false;refreshAccounts?.();};
+  unsubscribe=onSnapshot(collection(db,`${namespace}/cards`),{includeMetadataChanges:true},async snapshot=>{
+    if(!active()||stopped)return;
+    const cached=snapshot.metadata?.fromCache??false;
+    if(cached&&(remoteLoaded||live||!snapshot.docs.length))return;
+    if(!cached){live=true;remoteLoaded=true;notice('');}
+    else notice('Showing cached accounts while connecting.');
+    await apply(snapshot.docs.map(d=>({id:d.id,data:d.data()})),{cached});
+  },()=>{if(active()){live=false;refreshAccounts?.();}});
 }
 
 // ====== HELPERS ======

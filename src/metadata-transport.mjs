@@ -2,7 +2,8 @@ import { deadline,validCryptoMeta } from './lock-gate.mjs';
 
 export async function fallbackAfter(primary,fallback,delayMs=1500){
  let timer;
- try{return await Promise.race([primary,new Promise((resolve,reject)=>{timer=setTimeout(()=>Promise.resolve().then(fallback).then(resolve,reject),delayMs);})]);}
+ let secondary;const once=()=>secondary??=Promise.resolve().then(fallback);
+ try{return await Promise.race([Promise.resolve(primary).catch(once),new Promise((resolve,reject)=>{timer=setTimeout(()=>once().then(resolve,reject),delayMs);})]);}
  finally{clearTimeout(timer);}
 }
 
