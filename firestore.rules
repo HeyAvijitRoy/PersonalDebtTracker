@@ -1,71 +1,73 @@
 rules_version = '2';
-
-// Firestore security rules for Personal Debt Tracker.
-//
-// Data model (encrypted-only; no legacy plaintext):
-//   artifacts/{project}/users/{uid}/cards/{cardId}
-//     - { v, iv, data }              (AES-GCM envelope)
-//   artifacts/{project}/users/{uid}/meta/crypto
-//     - { v, salt, verifier: { iv, data } }
-//
-// Deploy:
-//   - Firebase Console → Firestore → Rules → paste this file → Publish, OR
-//   - firebase deploy --only firestore:rules   (requires firebase.json + CLI)
-//
-// Principle: a signed-in user can read/write ONLY documents under their own
-// uid. Everything else is denied by the absence of a matching allow rule.
-
+// Ciphertext-only, owner-only. Snapshots and immutable events commit together.
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // True only for the authenticated owner of this uid subtree.
-    function isOwner(userId) {
-      return request.auth != null && request.auth.uid == userId;
+    function owner(uid) { return request.auth != null && request.auth.uid == uid; }
+    function envelope(d, maximum) {
+      return d.v == 2 && d.iv is string && d.iv.size() == 16
+        && d.data is string && d.data.size() >= 24 && d.data.size() <= maximum
+        && d.revision is string && d.revision.matches('^[A-Za-z0-9-]{1,80}$');
     }
-
-    // A card doc must be exactly the encrypted envelope — only these keys,
-    // correctly typed and size-bounded — so a compromised client can't write
-    // arbitrary, extra, or oversized fields.
-    function isValidCard(d) {
-      return d.keys().hasOnly(['v', 'iv', 'data'])
-        && d.v == 1
-        && d['iv'] is string && d['iv'].size() <= 64
-        && d['data'] is string && d['data'].size() <= 8192;
+    function card(d) {
+      return d.keys().hasAll(['v','iv','data','revision','purging'])
+        && d.keys().hasOnly(['v','iv','data','revision','purging'])
+        && envelope(d, 8192) && d.purging is bool;
     }
-
-    // The per-user crypto meta doc: salt + passphrase verifier, fully validated
-    // down to the verifier subfields.
-    function isValidMeta(d) {
-      return d.keys().hasOnly(['v', 'salt', 'verifier'])
-        && d.v == 1
-        && d['salt'] is string && d['salt'].size() <= 128
-        && d['verifier'] is map
-        && d['verifier'].keys().hasOnly(['iv', 'data'])
-        && d['verifier']['iv'] is string && d['verifier']['iv'].size() <= 64
-        && d['verifier']['data'] is string && d['verifier']['data'].size() <= 1024;
+    function event(d) {
+      return d.keys().hasAll(['v','iv','data','revision','previous'])
+        && d.keys().hasOnly(['v','iv','data','revision','previous'])
+        && envelope(d, 32768) && d.previous is string && d.previous.size() <= 80;
     }
-
-    match /artifacts/{project}/users/{userId} {
-
-      // The user container doc itself is never used; deny direct access by
-      // not declaring an allow rule here.
-
-      match /cards/{cardId} {
-        allow read, delete: if isOwner(userId);
-        allow create, update: if isOwner(userId)
-          && isValidCard(request.resource.data);
+    function meta(d) {
+      return d.keys().hasAll(['v','salt','verifier']) && d.keys().hasOnly(['v','salt','verifier'])
+        && d.v == 1 && d.salt is string && d.salt.size() <= 128
+        && d.verifier is map && d.verifier.keys().hasAll(['iv','data'])
+        && d.verifier.keys().hasOnly(['iv','data'])
+        && d.verifier.iv is string && d.verifier.iv.size() <= 64
+        && d.verifier.data is string && d.verifier.data.size() <= 1024;
+    }
+    match /artifacts/{project}/users/{uid} {
+      match /cards/{id} {
+        function paired(previous) {
+          let revision = request.resource.data.revision;
+          let path = /databases/$(database)/documents/artifacts/$(project)/users/$(uid)/cards/$(id)/events/$(revision);
+          let after = getAfter(path).data;
+          return !exists(path) && event(after) && after.revision == revision && after.previous == previous;
+        }
+        allow read: if owner(uid);
+        allow create: if owner(uid) && card(request.resource.data) && !request.resource.data.purging && paired('absent');
+        allow update: if owner(uid) && card(request.resource.data)
+          && (resource.data.v == 1 || (resource.data.v == 2 && !resource.data.purging))
+          && paired(resource.data.v == 1 ? 'legacy' : resource.data.revision);
+        allow delete: if owner(uid) && resource.data.v == 2 && resource.data.purging;
+        match /events/{revision} {
+          function parentPath() {
+            return /databases/$(database)/documents/artifacts/$(project)/users/$(uid)/cards/$(id);
+          }
+          allow read: if owner(uid);
+          allow create: if owner(uid) && event(request.resource.data)
+            && request.resource.data.revision == revision
+            && getAfter(parentPath()).data.revision == revision
+            && card(getAfter(parentPath()).data)
+            && (!exists(parentPath()) ? request.resource.data.previous == 'absent'
+              : (get(parentPath()).data.v == 1 ? request.resource.data.previous == 'legacy'
+              : !get(parentPath()).data.purging && request.resource.data.previous == get(parentPath()).data.revision));
+          allow delete: if owner(uid) && get(parentPath()).data.purging == true;
+        }
+        match /restored/{revision} {
+          function parent() { return get(/databases/$(database)/documents/artifacts/$(project)/users/$(uid)/cards/$(id)).data; }
+          allow read: if owner(uid);
+          allow create: if owner(uid) && event(request.resource.data)
+            && request.resource.data.revision == revision && request.resource.data.previous == 'backup'
+            && parent().v == 2 && !parent().purging;
+          allow delete: if owner(uid) && parent().purging;
+        }
       }
-
-      // Only the single crypto meta doc is permitted under /meta.
       match /meta/crypto {
-        allow read, delete: if isOwner(userId);
-        allow create, update: if isOwner(userId)
-          && isValidMeta(request.resource.data);
+        allow read: if owner(uid);
+        allow create, update: if owner(uid) && meta(request.resource.data);
+        allow delete: if owner(uid);
       }
-
-      // Any other doc/subcollection under the user is denied by default.
     }
-
-    // All paths outside the per-user subtree are denied by default.
   }
 }

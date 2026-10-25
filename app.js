@@ -1,5 +1,34 @@
+import { decryptAccount } from "./src/account-crypto.mjs";
+import { moneyToCents, aprToBasisPoints } from "./src/money.mjs";
+import { SessionScope } from "./src/session-scope.mjs";
+import { TrackingStore,revisionOf,fieldsOf,cardPath,safeId } from "./src/tracking-store.mjs";
+import { indexedOutbox } from "./src/outbox.mjs";
+import { firestoreAdapter } from "./src/firestore-adapter.mjs";
+import { makeObservation,localDate } from "./src/observations.mjs";
+import { estimateBalance,paymentToTarget } from "./src/money.mjs";
+import { showHistory,makeBackup,restoreBackup,historyCSV,trackingDialog,confirmAction,element as uiElement,button as uiButton } from "./src/account-tools.mjs";
+import { BACKUP_FORMAT,validateBackup,csvCell } from "./src/backup.mjs";
+import { showPlanning,showPayment,showTransfer } from "./src/planning-ui.mjs";
+import { scenarioCost,reminders } from "./src/planning.mjs";
+import { ProgressPage } from "./src/progress-ui.mjs";
+import { preferences } from "./src/preferences.mjs";
+import { loadLockMetadata } from "./src/lock-gate.mjs";
+import { fallbackAfter,fetchCryptoMetadata,metadataCache } from "./src/metadata-transport.mjs";
+import { FirestoreReadClient } from "./src/firestore-read.mjs";
+import { encryptedReadCache } from "./src/encrypted-read-cache.mjs";
+const readCache=encryptedReadCache();
+let accountReader=null,refreshAccounts=null,stopAccountReads=null;
+const sessionScope = new SessionScope();
+let tracking=null,cloudCards=[],pendingRows=[],viewSequence=0;
+let cleanupRunning=false;
+let progressPage=null;
+let uiPreferences=preferences();
+let unreadableRecords=0;
+
 // ====== UI ELEMENTS ======
 const form = document.getElementById("debt-form");
+const addAccountDialog=document.getElementById('add-account-dialog');
+const addAccountError=document.getElementById('add-account-error');
 const cardList = document.getElementById("card-list");
 const avalancheList = document.getElementById("avalanche-list");
 const snowballList = document.getElementById("snowball-list");
@@ -77,16 +106,32 @@ let sortBy = sortBySelect?.value || "name";
 let sortDir = sortDirBtn?.dataset.dir || "desc";
 let utilView = utilViewSelect?.value || "bar";
 let editingId = null;
+let editingBase = null;
 let firstSnapshotReceived = false;
 let searchQuery = "";
 window.__latestCards = [];
 
 // ====== NAV HELPERS ======
 window.focusAddForm = () => {
-  const nameInput = document.getElementById("card-name");
-  nameInput?.scrollIntoView({ behavior: "smooth", block: "center" });
-  nameInput?.focus();
+  if(!tracking||!cryptoKey||addAccountDialog.open)return;
+  addAccountDialog.showModal();
+  document.getElementById('card-name')?.focus();
 };
+function resetAddAccountForm(){
+  form.reset();
+  document.getElementById('observation-date').value=localDate();
+  addAccountError.textContent='';
+  form.querySelector('.add-account-fields').scrollTop=0;
+  form.querySelectorAll('[aria-invalid]').forEach(input=>input.removeAttribute('aria-invalid'));
+  refreshEntry(form);
+}
+document.getElementById('cancel-add-account')?.addEventListener('click',()=>{resetAddAccountForm();addAccountDialog.close();});
+addAccountDialog?.addEventListener('cancel',resetAddAccountForm);
+addAccountDialog?.addEventListener('close',()=>{if(!addAccountDialog.open)resetAddAccountForm();});
+const appHeader=document.querySelector('.app-header');
+if(appHeader&&typeof ResizeObserver!=='undefined')new ResizeObserver(()=>{
+  document.documentElement.style.setProperty('--app-header-height',`${appHeader.getBoundingClientRect().height}px`);
+}).observe(appHeader);
 
 // ====== THEME ======
 function setTheme(isDark) {
@@ -183,7 +228,7 @@ function toast(message, duration = 1800) {
 }
 
 // ====== FIREBASE ======
-import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
 import {
   getAuth,
   onAuthStateChanged,
@@ -192,17 +237,17 @@ import {
   signInWithRedirect,
   getRedirectResult,
   signOut,
-} from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+} from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
 import {
-  getFirestore,
+  initializeFirestore,
   collection,
   onSnapshot,
   doc,
-  getDoc,
-  setDoc,
-  deleteDoc,
+  getDocFromCache,
+  getDocFromServer,
+  runTransaction,
   enableIndexedDbPersistence,
-} from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+} from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
 
 // Load config from env.js
 const firebaseConfig = window.__FIREBASE_CONFIG;
@@ -262,61 +307,27 @@ async function deriveKey(passphrase, saltBytes) {
   );
 }
 
-// Encrypt the plaintext card fields into a storable ciphertext envelope.
-async function encryptFields(fields) {
-  if (!cryptoKey) throw new Error("Locked: no encryption key in memory.");
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const payload = textEnc.encode(
-    JSON.stringify({
-      name: fields.name ?? "",
-      balance: +fields.balance || 0,
-      apr: +fields.apr || 0,
-      creditLimit: +fields.creditLimit || 0,
-    })
-  );
-  const ct = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
-    cryptoKey,
-    payload
-  );
-  return { v: 1, iv: toB64(iv), data: toB64(ct) };
-}
-
-// Decrypt a raw Firestore card document back to plaintext fields.
-// All cards are encrypted envelopes { v, iv, data }; anything else is treated
-// as an error (surfaced by the caller) rather than silently coerced.
-async function decryptFields(raw) {
-  if (!cryptoKey) throw new Error("Locked: no encryption key in memory.");
-  if (
-    !raw ||
-    raw.v !== 1 ||
-    typeof raw.iv !== "string" ||
-    typeof raw.data !== "string"
-  ) {
-    throw new Error("Malformed or unrecognized card document.");
-  }
-  const iv = fromB64(raw.iv);
-  const ct = fromB64(raw.data);
-  const plaintext = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv },
-    cryptoKey,
-    ct
-  );
-  return JSON.parse(textDec.decode(plaintext));
-}
-
 function metaDocRef(uid) {
   return doc(db, `artifacts/${appId}/users/${uid}/meta/crypto`);
 }
 
 async function loadCryptoMeta(uid) {
-  const snap = await getDoc(metaDocRef(uid));
-  return snap.exists() ? snap.data() : null;
+  const generation=sessionScope.generation;
+  let storage;try{storage=localStorage;}catch{}
+  const cache=metadataCache(storage,`${appId}:${uid}`);
+  const read=async getter=>{const snap=await getter(metaDocRef(uid));return snap.exists()?snap.data():null;};
+  const metadata=await loadLockMetadata({
+    cached:async()=>cache.read()??await read(getDocFromCache),
+    server:()=>fallbackAfter(read(getDocFromServer),()=>fetchCryptoMetadata({projectId:appId,uid,user:auth.currentUser})),
+  });
+  if(sessionScope.current(generation)&&userId===uid)cache.write(metadata);
+  return metadata;
 }
 
 // First-time setup: generate a salt, derive the key, store salt + a verifier
 // blob (encrypted known token) so future unlocks can validate the passphrase.
 async function createCryptoMeta(uid, passphrase) {
+  const generation = sessionScope.generation;
   const saltBytes = crypto.getRandomValues(new Uint8Array(16));
   const key = await deriveKey(passphrase, saltBytes);
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -325,17 +336,26 @@ async function createCryptoMeta(uid, passphrase) {
     key,
     textEnc.encode(VERIFY_TOKEN)
   );
-  await setDoc(metaDocRef(uid), {
+  const metadata={
     v: 1,
     salt: toB64(saltBytes),
     verifier: { iv: toB64(iv), data: toB64(ct) },
+  };
+  await runTransaction(db,async transaction=>{
+    const reference=metaDocRef(uid),existing=await transaction.get(reference);
+    if(existing.exists())throw new Error('Encryption settings already exist. Reload to unlock using your existing passphrase.');
+    if(!sessionScope.current(generation)||userId!==uid)throw new Error('Session changed. Sign in again.');
+    transaction.set(reference,metadata);
   });
+  if (!sessionScope.current(generation) || userId !== uid) throw new Error("Session changed. Sign in again.");
   cryptoKey = key;
 }
 
 // Returning session: derive the key and confirm the passphrase by decrypting
 // the verifier. Returns true on success, false on wrong passphrase.
 async function unlockWithPassphrase(meta, passphrase) {
+  const generation = sessionScope.generation;
+  const uid = userId;
   const saltBytes = fromB64(meta.salt);
   const key = await deriveKey(passphrase, saltBytes);
   try {
@@ -346,6 +366,7 @@ async function unlockWithPassphrase(meta, passphrase) {
   } catch (e) {
     return false; // AES-GCM auth-tag mismatch => wrong passphrase
   }
+  if (!sessionScope.current(generation) || !uid || userId !== uid) throw new Error("Session changed. Sign in again.");
   cryptoKey = key;
   return true;
 }
@@ -353,6 +374,7 @@ async function unlockWithPassphrase(meta, passphrase) {
 
 // ====== LOCK MODE UI FLOW ======
 function showLockSetup() {
+  document.getElementById('lock-loading')?.classList.add('hidden');
   authSection?.classList.add("hidden");
   appLoading?.classList.add("hidden");
   mainApp?.classList.add("hidden");
@@ -363,6 +385,7 @@ function showLockSetup() {
 }
 
 function showLockUnlock() {
+  document.getElementById('lock-loading')?.classList.add('hidden');
   authSection?.classList.add("hidden");
   appLoading?.classList.add("hidden");
   mainApp?.classList.add("hidden");
@@ -372,16 +395,115 @@ function showLockUnlock() {
   document.getElementById("lock-pass")?.focus();
 }
 
+let lockRequest=0;
+async function loadLockScreen(uid,generation=sessionScope.generation){
+ const attempt=++lockRequest;
+ authSection?.classList.add('hidden');mainApp?.classList.add('hidden');appLoading?.classList.add('hidden');
+ lockSection?.classList.remove('hidden');lockSetup?.classList.add('hidden');lockUnlock?.classList.add('hidden');
+ document.getElementById('lock-loading')?.classList.remove('hidden');
+ const status=document.getElementById('lock-loading-status'),retry=document.getElementById('lock-retry');
+ if(status)status.textContent='Loading your encryption settings...';if(retry)retry.classList.add('hidden');
+ try{
+  const meta=await loadCryptoMeta(uid);
+  if(attempt!==lockRequest||!sessionScope.current(generation)||userId!==uid)return;
+  currentCryptoMeta=meta;if(meta)showLockUnlock();else showLockSetup();
+ }catch(error){
+  if(attempt!==lockRequest||!sessionScope.current(generation)||userId!==uid)return;
+  if(status)status.textContent=error.code==='permission-denied'?'Could not read encryption settings. Check Firebase permissions and try again.':error.message;
+  retry?.classList.remove('hidden');
+ }
+}
+document.getElementById('lock-retry')?.addEventListener('click',()=>{if(userId)loadLockScreen(userId);});
+
 // Called once the key is in memory: hide the lock screen, show loading, and
 // start the (decrypting) Firestore listener.
 function enterAppAfterUnlock() {
+  try{uiPreferences=preferences(JSON.parse(localStorage.getItem(`pdt-preferences:${appId}:${userId}`)??'{}'));}catch{uiPreferences=preferences();}
+  document.getElementById('utilization-targets').value=uiPreferences.targets.join(', ');
+  document.getElementById('stale-days').value=uiPreferences.staleDays;
+  document.getElementById('promotion-warning-days').value=uiPreferences.warningDays;
+  const generation=sessionScope.generation,uid=userId,key=cryptoKey;
+  accountReader=new FirestoreReadClient({projectId:appId,uid,getUser:()=>auth.currentUser,isActive:()=>sessionScope.current(generation)&&userId===uid&&cryptoKey===key});
+  tracking?.close();
+  tracking=new TrackingStore({namespace:`artifacts/${appId}/users/${uid}`,key,
+    adapter:firestoreAdapter(db,accountReader),outbox:indexedOutbox(),
+    isActive:()=>sessionScope.current(generation)&&userId===uid&&cryptoKey===key,
+    onChange:()=>{refreshTrackingView().catch(()=>{});},
+  });
   lockSection?.classList.add("hidden");
   lockSetup?.classList.add("hidden");
   lockUnlock?.classList.add("hidden");
   appLoading?.classList.remove("hidden");
   firstSnapshotReceived = false;
   setupFirestoreListener(userId);
+  tracking.flush().catch(()=>{});
 }
+
+async function refreshTrackingView() {
+  const store=tracking,sequence=++viewSequence;
+  if(!store)return;
+  const rows=await store.pending();
+  if(store!==tracking||sequence!==viewSequence)return;
+  pendingRows=rows;
+  const blocked=new Set(rows.filter(row=>row.status==="conflict").map(row=>row.operation.accountId));
+  const view=new Map(cloudCards.map(card=>[card.id,card]));
+  for(const row of rows) {
+    const op=row.operation;if(blocked.has(op.accountId)||op.type==='restore-history')continue;
+    view.set(op.accountId,{...op.after,id:op.accountId,_revision:op.id,_pending:true});
+    if(op.type==='transfer'&&op.details.other){const other=op.details.other;view.set(other.id,{...other.after,id:other.id,_revision:op.id,_pending:true});}
+  }
+  window.__latestCards=[...view.values()].filter(card=>!card.deletedAt);
+  renderAll(window.__latestCards);
+  renderSyncStatus();
+  const notice=document.getElementById('data-quality-notice');if(notice)notice.textContent=unreadableRecords?`${unreadableRecords} account(s) could not be read. Totals are incomplete; update the app or restore a valid backup. No records were changed.`:'';
+  cleanupDeletedAccounts().catch(()=>{});
+}
+
+async function cleanupDeletedAccounts(){
+  const store=tracking;if(!store||cleanupRunning)return;cleanupRunning=true;
+  try{
+    for(const card of cloudCards.filter(card=>card.deletedAt)){
+      store.active();if(pendingRows.some(row=>row.operation.accountId===card.id))continue;
+      const remaining=8000-(Date.now()-Date.parse(card.deletedAt));
+      if(remaining>0){setTimeout(()=>cleanupDeletedAccounts().catch(()=>{}),remaining+50);continue;}
+      if(!card._purging){await store.enqueue(card,fieldsOf(card),'purge');await store.flush();setTimeout(()=>cleanupDeletedAccounts().catch(()=>{}),100);return;}
+      await store.adapter.purge(cardPath(store.namespace,card.id),()=>!store.closed&&store.isActive());
+    }
+  }finally{cleanupRunning=false;}
+}
+
+function renderSyncStatus() {
+  const box=document.getElementById("sync-status");if(!box)return;
+  box.replaceChildren();
+  if(!pendingRows.length){box.textContent="No local drafts pending. Balances reflect the last received observations.";return;}
+  const title=document.createElement("p");title.textContent=`${pendingRows.length} encrypted change(s) saved on this device, waiting to sync.`;box.append(title);
+  for(const row of pendingRows){
+    const op=row.operation,line=document.createElement("div");line.className="tracker-sync-row";
+    const text=document.createElement("span");
+    const current=cloudCards.find(c=>c.id===op.accountId);
+    text.textContent=row.error==="rules"?`${op.after.name}: server permissions/rules need attention; draft retained.`:row.status==="conflict"?`${op.after.name}: draft balance ${fmtMoney(op.after.balance)}; latest balance ${current?fmtMoney(current.balance):"account removed"}.`:op.after.name+": pending connection.";
+    line.append(text);
+    if(row.status==='conflict'){
+      const details=document.createElement('details');details.className='tracker-details';const title=document.createElement('summary');title.textContent='Review all draft and latest fields';const values=document.createElement('pre');values.style.whiteSpace='pre-wrap';values.textContent=JSON.stringify({draft:op.after,linkedDraft:op.details?.other??null,latest:current?fieldsOf(current):null,linkedLatest:op.details?.other?cloudCards.find(card=>card.id===op.details.other.id)??null:null},null,2);details.append(title,values);line.append(details);
+    }
+    if(row.status==="conflict"&&op.type!=="transfer"){
+      const apply=document.createElement("button");apply.className="tracker-button";apply.textContent="Apply my draft to latest";
+      apply.onclick=async()=>{const store=tracking;if(!current||!store)return;try{await store.discard(op.accountId);await store.enqueue(current,op.after,"conflict-resolution",op.details);store.flush().catch(()=>{});}catch{showModal("Not saved","Could not apply the draft. Please try again.");}};line.append(apply);
+    }
+    const discard=document.createElement("button");discard.className="tracker-button";discard.textContent="Discard this account and linked drafts";
+    discard.onclick=()=>tracking?.discard(op.accountId).catch(()=>showModal("Error","Could not discard the draft."));line.append(discard);box.append(line);
+  }
+  const retry=document.createElement("button");retry.className="tracker-button";retry.textContent="Retry sync";retry.onclick=()=>tracking?.flush().catch(()=>{});box.append(retry);
+}
+
+async function saveTracked(view,account,type="edit",details={}) {
+  if(!tracking||!userId||!cryptoKey)throw new Error("Sign in and unlock before saving.");
+  const store=tracking;
+  const result=await store.enqueue(view,account,type,details);
+  if(store!==tracking)throw new Error("Session changed.");
+  await refreshTrackingView();store.flush().catch(()=>{});return result;
+}
+window.addEventListener("online",()=>tracking?.flush().catch(()=>{}));
 
 lockSetupForm?.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -408,7 +530,7 @@ lockSetupForm?.addEventListener("submit", async (e) => {
     enterAppAfterUnlock();
   } catch (err) {
     console.error("[Crypto] Setup failed:", err);
-    showErr("Could not enable Lock Mode. Please try again.");
+    showErr(err.message?.startsWith('Encryption settings already exist')?err.message:"Could not enable Lock Mode. Please try again.");
     btn.disabled = false;
     btn.textContent = prev;
   }
@@ -447,11 +569,55 @@ lockUnlockForm?.addEventListener("submit", async (e) => {
   }
 });
 
+function clearUnlockedState() {
+  addAccountDialog?.close();resetAddAccountForm();
+  stopAccountReads?.();stopAccountReads=null;refreshAccounts=null;accountReader=null;
+  document.getElementById('account-connection')?.classList.add('hidden');
+  lockRequest++;
+  progressPage?.clear();
+  unreadableRecords=0;
+  tracking?.close();tracking=null;cloudCards=[];pendingRows=[];viewSequence++;
+  document.querySelectorAll(".tracker-undo").forEach(element=>element.remove());
+  document.querySelectorAll(".tracking-dialog").forEach(dialog=>{dialog.close();dialog.remove();});
+  sessionScope.invalidate();
+  if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+  cryptoKey = null;
+  currentCryptoMeta = null;
+  window.__latestCards = [];
+  firstSnapshotReceived = false;
+  editingId = null;
+  editingBase = null;
+  searchQuery='';if(accountSearchInput)accountSearchInput.value='';
+  for (const id of ["card-list", "avalanche-list", "snowball-list", "expensive-list", "fico-hints", "bt-output", "sim-output","upcoming-reminders","sync-status","data-quality-notice"]) {
+    document.getElementById(id)?.replaceChildren();
+  }
+  for (const element of [totalDebtDisplay, totalCreditLineDisplay, totalMonthlyInterestDisplay, totalYearlyInterestDisplay]) {
+    if (element) element.textContent = "$0.00";
+  }
+  if (accountsMeta) accountsMeta.textContent = "";
+  if (overallUtilBar) overallUtilBar.style.width = "0%";
+  if (overallUtilText) overallUtilText.textContent = "0%";
+  btTargetSelect?.replaceChildren();
+  for (const id of ["lock-pass", "lock-pass1", "lock-pass2", "sim-budget", "bt-limit", "bt-fee", "bt-months", "bt-cap", "bt-target-name"]) {
+    const input = document.getElementById(id);
+    if (input) input.value = "";
+  }
+  form?.reset();
+  if(document.getElementById("observation-date"))document.getElementById("observation-date").value=localDate();
+  closeModal();
+  if (modalMessage) modalMessage.textContent = "";
+  if (modalTitle) modalTitle.textContent = "";
+  if (liveRegion) liveRegion.textContent = "";
+  mainApp?.classList.add("hidden");
+}
+
 function initFirebase() {
   try {
     const app = initializeApp(firebaseConfig);
     auth = getAuth(app);
-    db = getFirestore(app);
+    // Close each network response promptly for proxies/antivirus that buffer
+    // streaming WebChannel requests. No authentication or rules are bypassed.
+    db = initializeFirestore(app,{experimentalForceLongPolling:true});
 
     // Offline-first Firestore (ignore multi-tab error)
     enableIndexedDbPersistence(db).catch(() => {});
@@ -460,7 +626,7 @@ function initFirebase() {
     getRedirectResult(auth)
       .then((res) => {
         if (res?.user)
-          console.log("[Auth] Redirect success for", res.user.email);
+          console.log("[Auth] Redirect sign-in completed.");
       })
       .catch((err) => {
         console.warn("[Auth] Redirect error:", err?.code, err?.message);
@@ -471,6 +637,8 @@ function initFirebase() {
       });
 
     onAuthStateChanged(auth, async (user) => {
+      clearUnlockedState();
+      const generation = sessionScope.generation;
       if (user) {
         userId = user.uid;
         firstSnapshotReceived = false;
@@ -478,26 +646,11 @@ function initFirebase() {
         currentCryptoMeta = null;
         authSection?.classList.add("hidden");
         mainApp?.classList.add("hidden");
-        appLoading?.classList.remove("hidden");
+        appLoading?.classList.add("hidden");
         lockSection?.classList.add("hidden");
         authStatus && (authStatus.textContent = "");
         setHeaderAuthUI(true, user.displayName);
-        // Lock Mode gate: load crypto settings, then set up or unlock.
-        try {
-          currentCryptoMeta = await loadCryptoMeta(user.uid);
-          if (!currentCryptoMeta) {
-            showLockSetup();
-          } else {
-            showLockUnlock();
-          }
-        } catch (err) {
-          console.error("[Crypto] Failed to load crypto meta:", err);
-          appLoading?.classList.add("hidden");
-          showModal(
-            "Error",
-            "Could not load your encryption settings. Please refresh and try again."
-          );
-        }
+        await loadLockScreen(user.uid,generation);
       } else {
         userId = null;
         cryptoKey = null;
@@ -519,49 +672,59 @@ function initFirebase() {
 
 function setupFirestoreListener(uid) {
   if (unsubscribe) unsubscribe();
-  const cardsCollection = collection(
-    db,
-    `artifacts/${appId}/users/${uid}/cards`
-  );
-  unsubscribe = onSnapshot(
-    cardsCollection,
-    async (snapshot) => {
-      const decrypted = [];
-      for (const d of snapshot.docs) {
-        try {
-          const fields = await decryptFields(d.data());
-          decrypted.push({ id: d.id, ...fields });
-        } catch (err) {
-          // A doc we can't decrypt (e.g. wrong key) is skipped rather than
-          // crashing the whole render.
-          console.error("[Crypto] Could not decrypt card", d.id, err);
-        }
-      }
-      window.__latestCards = decrypted;
-      if (editingId && !window.__latestCards.find((c) => c.id === editingId))
-        editingId = null;
-
-      if (!firstSnapshotReceived) {
-        firstSnapshotReceived = true;
-        appLoading?.classList.add("hidden");
-        mainApp?.classList.remove("hidden");
-      }
-
-      renderAll(window.__latestCards);
-    },
-    (error) => {
-      console.error("[Firestore] onSnapshot error:", error);
-      // Ignore errors that arrive after sign-out (e.g. permission-denied as
-      // the listener tears down) — don't resurrect the data view.
-      if (!userId) return;
-      appLoading?.classList.add("hidden");
-      mainApp?.classList.remove("hidden");
-      showModal(
-        "Sync error",
-        "Lost connection to your data. Changes may not be up to date — try refreshing."
-      );
+  stopAccountReads?.();
+  const generation=sessionScope.generation,listenerKey=cryptoKey,reader=accountReader;
+  const namespace=`artifacts/${appId}/users/${uid}`;
+  const active=()=>sessionScope.current(generation)&&userId===uid&&cryptoKey===listenerKey;
+  let live=false,busy=false,stopped=false,remoteLoaded=false;
+  const panel=document.getElementById('account-connection');
+  const notice=message=>{if(!active())return;panel?.classList.toggle('hidden',!message);const label=document.getElementById('account-connection-message');if(label)label.textContent=message;};
+  async function apply(rows,{cached=false,rejected:cachedRejected=0}={}) {
+    if(!active()||stopped)return;
+    const ticket=sessionScope.startRead(),decrypted=[],valid=[];let rejected=cachedRejected;
+    for(const row of rows) {
+      try {
+        const fields=await decryptAccount(row.data,listenerKey,`${namespace}/cards/${row.id}`);
+        if(!active()||!sessionScope.accepts(ticket))return;
+        decrypted.push({...fields,id:safeId(row.id),_revision:revisionOf(row.data),_purging:row.data.purging??false});valid.push(row);
+      }catch{rejected++;}
     }
-  );
+    if(!active()||!sessionScope.accepts(ticket))return;
+    cloudCards=decrypted;window.__latestCards=decrypted;unreadableRecords=rejected;
+    if(editingId&&!decrypted.some(card=>card.id===editingId))editingId=null;
+    firstSnapshotReceived=true;appLoading?.classList.add('hidden');mainApp?.classList.remove('hidden');
+    if(tracking)await refreshTrackingView();else renderAll(decrypted);
+    if(!cached&&active()&&sessionScope.accepts(ticket))readCache.write(namespace,valid,rejected).catch(()=>{});
+  }
+  refreshAccounts=async()=>{
+    if(!active()||stopped||busy)return;
+    busy=true;notice('Refreshing encrypted account data...');
+    try {
+      const rows=await reader.accounts();
+      if(!active()||live||stopped)return;
+      remoteLoaded=true;await apply(rows);notice('Accounts loaded through HTTPS. Live sync is unavailable; refresh to check for updates. Changes remain pending until sync confirms them.');
+    }catch(error){
+      if(!active()||live||stopped)return;
+      if(!firstSnapshotReceived){
+        try{const cached=await readCache.read(namespace);if(cached&&active())await apply(cached.rows,{cached:true,rejected:cached.rejected});}catch{}
+      }
+      if(!active())return;
+      appLoading?.classList.add('hidden');
+      notice(`${firstSnapshotReceived?'Showing previously loaded data. ':''}${error.message}`);
+    }finally{busy=false;}
+  };
+  const timer=setTimeout(()=>{if(!live)refreshAccounts?.();},1500);
+  const interval=setInterval(()=>{if(!live&&document.visibilityState==='visible')refreshAccounts?.();},60000);
+  stopAccountReads=()=>{stopped=true;clearTimeout(timer);clearInterval(interval);};
+  const refreshButton=document.getElementById('account-refresh');if(refreshButton)refreshButton.onclick=()=>{live=false;refreshAccounts?.();};
+  unsubscribe=onSnapshot(collection(db,`${namespace}/cards`),{includeMetadataChanges:true},async snapshot=>{
+    if(!active()||stopped)return;
+    const cached=snapshot.metadata?.fromCache??false;
+    if(cached&&(remoteLoaded||live||!snapshot.docs.length))return;
+    if(!cached){live=true;remoteLoaded=true;notice('');}
+    else notice('Showing cached accounts while connecting.');
+    await apply(snapshot.docs.map(d=>({id:d.id,data:d.data()})),{cached});
+  },()=>{if(active()){live=false;refreshAccounts?.();}});
 }
 
 // ====== HELPERS ======
@@ -587,11 +750,12 @@ function computeTotals(cards) {
       l = +c.creditLimit || 0,
       a = +c.apr || 0;
     debt += b;
-    limit += l;
-    monthly += monthlyInterest(b, a);
+    if(c.status!=="closed")limit += l;
+    monthly += scenarioCost(c)??0;
   }
-  const util = limit > 0 ? (debt / limit) * 100 : 0;
-  return { debt, limit, monthly, util };
+  const openDebt=cards.filter(c=>c.status!=="closed").reduce((sum,c)=>sum+(+c.balance||0),0);
+  const util = limit > 0 ? (openDebt / limit) * 100 : 0;
+  return { debt, limit, monthly, util,scenarioCount:cards.filter(c=>scenarioCost(c)!==null).length };
 }
 function computeCardUtilization(card) {
   const b = +card.balance || 0,
@@ -600,12 +764,12 @@ function computeCardUtilization(card) {
 }
 function riskBadge(util) {
   if (util > 80)
-    return '<span class="inline-block text-[10px] px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300">&gt;80% High</span>';
+    return '<span class="inline-block text-[10px] px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300">&gt;80% utilization</span>';
   if (util > 50)
-    return '<span class="inline-block text-[10px] px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300">&gt;50% Medium</span>';
+    return '<span class="inline-block text-[10px] px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300">&gt;50% utilization</span>';
   if (util > 30)
-    return '<span class="inline-block text-[10px] px-2 py-0.5 rounded-full bg-yellow-100 dark:bg-yellow-950/50 text-yellow-700 dark:text-yellow-300">&gt;30% Watch</span>';
-  return '<span class="inline-block text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300">Healthy</span>';
+    return '<span class="inline-block text-[10px] px-2 py-0.5 rounded-full bg-yellow-100 dark:bg-yellow-950/50 text-yellow-700 dark:text-yellow-300">&gt;30% utilization</span>';
+  return '<span class="inline-block text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300">At or below 30%</span>';
 }
 function rankByInterestPer100(cards) {
   return cards
@@ -622,7 +786,7 @@ function rankByInterestPer100(cards) {
 
 // FICO optics
 function computeFicoHints(cards) {
-  const thresholds = [80, 50, 30];
+  const thresholds = uiPreferences.targets;
   let over80 = 0,
     over50 = 0,
     over30 = 0;
@@ -632,6 +796,7 @@ function computeFicoHints(cards) {
     sumTo30 = 0;
 
   for (const c of cards) {
+    if(c.status==='closed')continue;
     const bal = +c.balance || 0,
       lim = +c.creditLimit || 0;
     if (!lim || bal <= 0) continue;
@@ -652,8 +817,8 @@ function computeFicoHints(cards) {
     const next = thresholds.find((t) => util > t);
     if (next !== undefined) {
       const targetBal = (next / 100) * lim;
-      const dollarsToDrop = Math.max(0, bal - targetBal);
-      if (dollarsToDrop > 0.01)
+      const dollarsToDrop = paymentToTarget(bal, lim, next) / 100;
+      if (dollarsToDrop > 0)
         nudges.push({
           name: c.name,
           currentUtil: util,
@@ -664,9 +829,10 @@ function computeFicoHints(cards) {
   }
   nudges.sort((a, b) => a.dollarsToDrop - b.dollarsToDrop);
 
-  const { debt, limit } = computeTotals(cards);
-  const to50Overall = Math.max(0, debt - 0.5 * limit);
-  const to30Overall = Math.max(0, debt - 0.3 * limit);
+  const { limit } = computeTotals(cards);
+  const openDebt=cards.filter(card=>card.status!=='closed').reduce((sum,card)=>sum+card.balance,0);
+  const to50Overall = limit>0?Math.max(0, openDebt - 0.5 * limit):null;
+  const to30Overall = limit>0?Math.max(0, openDebt - 0.3 * limit):null;
 
   return {
     over80,
@@ -679,6 +845,25 @@ function computeFicoHints(cards) {
     to50Overall,
     to30Overall,
   };
+}
+
+function renderCardFicoHint(card) {
+  if(card.status==='closed')return '<p class="tracker-help">Issuer-closed account: outstanding balance remains tracked; no open-credit utilization target is suggested.</p>';
+  const nudge = computeFicoHints([card]).nudges[0];
+  const message = nudge
+    ? `<span class="font-semibold text-sky-700 dark:text-sky-400">Pay ${fmtMoney(nudge.dollarsToDrop)}</span> to reach ${nudge.nextThreshold}% utilization.`
+    : +card.creditLimit > 0
+    ? computeCardUtilization(card) <= 30
+      ? "No payment needed for the selected utilization targets."
+      : "At the next utilization target to within $0.01."
+    : "Add a credit limit to see the threshold payment amount.";
+
+  return `
+    <div class="mt-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+      <p class="text-xs font-medium text-gray-700 dark:text-gray-300">Payments to utilization targets</p>
+      <p class="mt-1 text-sm text-gray-700 dark:text-gray-300">${message}</p>
+    </div>
+  `;
 }
 
 // Balance transfer planner
@@ -765,6 +950,7 @@ function planBalanceTransfer(
 
 // Payoff schedule simulator
 function simulatePayoff(cards, monthlyBudget, strategy) {
+  if(cards.some(card=>hasBalance(card)&&card.rateBasis&&card.rateBasis!=='single'))return {error:'Mixed or unknown APR categories need a single-rate scenario assumption before simulation.'};
   const MAX_MONTHS = 600; // 50-year safety cap
   let working = cards
     .map((c) => ({ name: c.name, balance: +c.balance || 0, apr: +c.apr || 0 }))
@@ -846,6 +1032,11 @@ function sortCardsGeneric(cards) {
         va = per100A;
         vb = per100B;
         break;
+      case "monthlyInterest":
+        va = scenarioCost(a);
+        vb = scenarioCost(b);
+        if(va===null||vb===null)return va===vb?0:va===null?1:-1;
+        break;
       default:
         va = 0;
         vb = 0;
@@ -862,13 +1053,14 @@ function validateCardInput({ name, balance, apr, creditLimit }) {
   const errors = {};
   if (!name) errors.name = "Enter an account name.";
   else if (name.length > 60) errors.name = "Keep the name under 60 characters.";
-  if (Number.isNaN(balance) || balance < 0)
-    errors.balance = "Enter a balance of 0 or more.";
-  if (Number.isNaN(apr) || apr < 0 || apr > 99.99)
-    errors.apr = "Enter an APR between 0 and 99.99.";
-  if (Number.isNaN(creditLimit) || creditLimit < 0)
-    errors.creditLimit = "Enter a credit limit of 0 or more.";
+  try { moneyToCents(balance); } catch { errors.balance = "Enter a balance of 0 or more, with at most two decimal places."; }
+  try { aprToBasisPoints(apr); } catch { errors.apr = "Enter an APR between 0 and 99.99, with at most two decimal places."; }
+  try { moneyToCents(creditLimit); } catch { errors.creditLimit = "Enter a credit limit of 0 or more, with at most two decimal places."; }
   return errors;
+}
+
+function parseDecimalInput(value) {
+  try { return moneyToCents(value) / 100; } catch { return NaN; }
 }
 
 const INVALID_INPUT_CLASSES = ["border-rose-500", "dark:border-rose-500", "focus:ring-rose-500"];
@@ -939,17 +1131,22 @@ function renderAll(cards) {
   renderStrategy(cards, "snowball");
   renderExpensive(cards);
   renderFicoHints(cards);
+  renderReminders(cards);
+  progressPage?.refresh();
 }
 
 function renderCards(cards) {
-  const { debt, limit, monthly, util } = computeTotals(cards);
+  const currentEditor=cardList?.querySelector('.save-inline-btn')?.closest('.debt-card');
+  const draft=currentEditor?Array.from(currentEditor.querySelectorAll('[data-field]')).map(input=>({field:input.dataset.field,value:input.value,checked:input.checked})):null;
+  const { debt, limit, monthly, util,scenarioCount } = computeTotals(cards);
   if (totalDebtDisplay) totalDebtDisplay.textContent = fmtMoney(debt);
   if (totalCreditLineDisplay)
     totalCreditLineDisplay.textContent = fmtMoney(limit);
   if (totalMonthlyInterestDisplay)
-    totalMonthlyInterestDisplay.textContent = fmtMoney(monthly);
+    totalMonthlyInterestDisplay.textContent = scenarioCount||!cards.length?fmtMoney(monthly):'Not included';
   if (totalYearlyInterestDisplay)
-    totalYearlyInterestDisplay.textContent = fmtMoney(monthly * 12);
+    totalYearlyInterestDisplay.textContent = scenarioCount||!cards.length?fmtMoney(monthly * 12):'Not included';
+  const coverage=document.getElementById('scenario-coverage');if(coverage)coverage.textContent=`Interest scenarios include ${scenarioCount} of ${cards.length} accounts. Opt in per account under Statement & planning. Constant balances/rates, before fees and compounding; not actual charges.`;
   if (overallUtilBar) {
     const pct = Math.max(0, Math.min(100, util));
     overallUtilBar.style.width = `${pct}%`;
@@ -957,7 +1154,7 @@ function renderCards(cards) {
       "h-2.5 rounded-full transition-all " +
       (pct <= 30 ? "bg-emerald-500" : pct <= 50 ? "bg-amber-500" : "bg-rose-500");
   }
-  if (overallUtilText) overallUtilText.textContent = `${util.toFixed(1)}%`;
+  if (overallUtilText) overallUtilText.textContent = limit>0?`${util.toFixed(1)}%`:'Unavailable';
   if (accountsMeta)
     accountsMeta.textContent = cards.length
       ? `Accounts: ${cards.length}`
@@ -972,10 +1169,14 @@ function renderCards(cards) {
     return;
   }
 
+  const showArchived=document.getElementById('show-archived')?.checked;
+  const staleOnly=document.getElementById('stale-only')?.checked;
+  const staleDays=Number(document.getElementById('stale-days')?.value)||7;
+  const visible=cards.filter(card=>(showArchived||!card.archived)&&(!staleOnly||!card.effectiveDate||(Date.now()-Date.parse(card.effectiveDate+'T00:00:00'))/86400000>=staleDays));
   const query = searchQuery.trim().toLowerCase();
   const filtered = query
-    ? cards.filter((c) => (c.name || "").toLowerCase().includes(query))
-    : cards;
+    ? visible.filter((c) => (c.name || "").toLowerCase().includes(query))
+    : visible;
 
   if (!filtered.length) {
     if (noCardsMessage) {
@@ -991,7 +1192,7 @@ function renderCards(cards) {
     const balance = +card.balance || 0;
     const apr = +card.apr || 0;
     const creditLimit = +card.creditLimit || 0;
-    const monthlyInt = monthlyInterest(balance, apr);
+    const monthlyInt = scenarioCost(card);
     const utilization = computeCardUtilization(card);
     const utilColor =
       utilization <= 30
@@ -1012,7 +1213,7 @@ function renderCards(cards) {
             <h3 class="name-fit text-base font-semibold text-gray-900 dark:text-gray-100" title="${escapeHtml(card.name)}">
               ${escapeHtml(card.name)}
             </h3>
-            <div class="mt-1">${riskBadge(utilization)}</div>
+            <div class="mt-1">${creditLimit>0?riskBadge(utilization):'<span class="tracker-help">Utilization unavailable: no positive limit</span>'}</div>
             <div class="mt-1 grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-gray-600 dark:text-gray-400">
               <p>Balance: <span class="font-semibold text-gray-900 dark:text-gray-100">${fmtMoney(
                 balance
@@ -1030,10 +1231,11 @@ function renderCards(cards) {
               <p>Limit: <span class="font-semibold text-gray-900 dark:text-gray-100">${fmtMoney(
                 creditLimit
               )}</span></p>
-              <p>Monthly Interest: <span class="font-semibold text-gray-900 dark:text-gray-100">${fmtMoney(
-                monthlyInt
-              )}</span></p>
+              <p>Monthly cost scenario: <span class="font-semibold text-gray-900 dark:text-gray-100">${monthlyInt===null?'Not included':fmtMoney(monthlyInt)}</span></p>
             </div>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Hypothetical monthly cost per $100 at entered APR: ${card.rateBasis&&card.rateBasis!=='single'?'Unavailable':fmtMoney(interestPer100(apr))}</p>
+            <p class="tracker-help">${card.entryMethod==='availableCredit'?'Estimated from available credit: '+fmtMoney(card.availableCredit):'Direct balance entry'} | ${card.effectiveDate?(card.provisional?'Provisional as of ':'Observed ')+escapeHtml(card.effectiveDate):'Observation date not recorded'}${card._pending?' | Pending sync':''}${card.provisional?' | Refresh issuer inputs to reconcile.':''}</p>
+            <p class="tracker-help">${card.archived?'Archived (still included in totals). ':''}${card.status==='closed'?'Issuer-closed; outstanding balance remains tracked. ':''}${!card.effectiveDate||(Date.now()-Date.parse(card.effectiveDate+'T00:00:00'))/86400000>=Number(document.getElementById('stale-days')?.value||7)?'Balance needs an update.':''}</p>
             <div class="mt-2 flex items-center gap-2">
               <span class="text-xs text-gray-500 dark:text-gray-400">Quick pay:</span>
               <button
@@ -1046,34 +1248,17 @@ function renderCards(cards) {
               >+$50</button>
             </div>
           </div>
-          <div class="flex gap-2 shrink-0 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity">
-            <button
-              class="inline-edit-btn w-9 h-9 flex items-center justify-center rounded-full bg-sky-600 text-white hover:bg-sky-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 transition-colors"
-              data-id="${card.id}" title="Edit" aria-label="Edit">
-              <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M15.232 5.232l3.536 3.536M4 20h4l10.5-10.5a2.5 2.5 0 10-3.536-3.536L4 16v4z"/>
-              </svg>
-            </button>
-            <button
-              class="delete-btn w-9 h-9 flex items-center justify-center rounded-full bg-rose-500 text-white hover:bg-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 transition-colors"
-              data-id="${card.id}" title="Delete" aria-label="Delete">
-              <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M6 7h12M9 7V5a2 2 0 012-2h2a2 2 0 012 2v2m1 0v12a2 2 0 01-2 2H8a2 2 0 01-2-2V7"/>
-              </svg>
-            </button>
-          </div>
+
         </div>
 
         <div class="mt-3">
           <div class="flex items-center justify-between mb-1">
-            <p class="text-sm text-gray-700 dark:text-gray-300">Utilization: <span class="font-semibold">${utilization.toFixed(
-              1
-            )}%</span></p>
+            <p class="text-sm text-gray-700 dark:text-gray-300">Estimated utilization: <span class="font-semibold">${creditLimit>0?utilization.toFixed(1)+'%':'Unavailable'}</span></p>
             <p class="text-xs text-gray-400 dark:text-gray-500">View: ${utilView.toUpperCase()}</p>
           </div>
 
           ${
-            utilView === "pie"
+            creditLimit<=0?'':utilView === "pie"
               ? donut(utilization)
               : `
             <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
@@ -1084,6 +1269,26 @@ function renderCards(cards) {
             </div>
           `
           }
+          ${renderCardFicoHint(card)}
+            <div class="account-toolbar">
+              <button type="button" class="inline-edit-btn account-update" data-id="${card.id}">Update balance</button>
+              <button type="button" class="account-history" data-account-action="history" data-id="${card.id}">View history</button>
+              <details class="account-menu">
+                <summary>Actions</summary>
+                <div class="account-menu-panel">
+                  <p class="account-menu-heading">Planning & records</p>
+                  <button type="button" data-account-action="planning" data-id="${card.id}">Statement & planning</button>
+                  <button type="button" data-account-action="payment" data-id="${card.id}">Record payment</button>
+                  <button type="button" data-account-action="transfer" data-id="${card.id}">Record transfer</button>
+                  <button type="button" class="refresh-observation" data-id="${card.id}">Confirm current values as observed today</button>
+                  <p class="account-menu-heading">Manage account</p>
+                  <button type="button" data-account-action="archive" data-id="${card.id}">${card.archived?'Unarchive':'Archive'}</button>
+                  <button type="button" data-account-action="status" data-id="${card.id}">${card.status==='closed'?'Mark issuer-open':'Mark issuer-closed'}</button>
+                  <button type="button" class="delete-btn account-remove" data-id="${card.id}">Delete account</button>
+                </div>
+              </details>
+            </div>
+
         </div>
       `;
     } else {
@@ -1095,6 +1300,7 @@ function renderCards(cards) {
             </h3>
             <div class="mt-1"><span class="inline-block text-[10px] px-2 py-0.5 rounded-full bg-sky-100 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300">Editing</span></div>
             <div class="mt-3 space-y-3 text-sm">
+              ${renderEntryExtras(card)}
               <label class="block">
                 <span class="text-gray-600 dark:text-gray-400">Balance ($)</span>
                 <input data-field="balance" type="number" inputmode="decimal" step="0.01" min="0" value="${balance}"
@@ -1136,7 +1342,22 @@ function renderCards(cards) {
       `;
     }
     cardList.appendChild(el);
+    if(isEditing){
+      if(draft)for(const field of draft){const input=el.querySelector(`[data-field="${field.field}"]`);if(input){input.value=field.value;if(input.type==='checkbox')input.checked=field.checked;}}
+      refreshEntry(el);
+    }
   });
+}
+
+function renderEntryExtras(card){
+  const method=card.entryMethod??'direct';
+  return `<label class="block">Balance entry<select class="tracker-input" data-field="entryMethod"><option value="availableCredit" ${method==='availableCredit'?'selected':''}>Calculate from available credit</option><option value="direct" ${method==='direct'?'selected':''}>Enter balance directly</option></select></label>
+    <label class="block">Available credit ($)<input class="tracker-input" data-field="availableCredit" type="number" step="0.01" min="0" value="${card.availableCredit??''}" /></label>
+    <p class="balance-preview tracker-help"></p>
+    <label class="block">Observed on<input class="tracker-input" data-field="effectiveDate" type="date" value="${localDate()}" /></label>
+    <label class="block"><input data-field="confirmObservation" type="checkbox" /> I checked these balance inputs today (or on the selected date)</label>
+    <label class="block">Reason (optional)<input class="tracker-input" data-field="reason" maxlength="120" value="" /></label>
+    <label class="block">Note (optional)<textarea class="tracker-input" data-field="note" maxlength="1000">${escapeHtml(card.note??'')}</textarea></label>`;
 }
 
 function donut(util) {
@@ -1150,12 +1371,12 @@ function donut(util) {
   const trackColor = isDark ? "#374151" : "#e5e7eb";
   return `
     <div class="flex items-center gap-3">
-      <svg width="56" height="56" viewBox="0 0 48 48" role="img" aria-label="Utilization: ${pct.toFixed(1)}%">
+      <svg width="56" height="56" viewBox="0 0 48 48" role="img" aria-label="Utilization: ${util.toFixed(1)}%">
         <circle cx="24" cy="24" r="${r}" stroke="${trackColor}" stroke-width="6" fill="none"/>
         <circle cx="24" cy="24" r="${r}" stroke="${color}" stroke-width="6" fill="none"
                 stroke-dasharray="${filled} ${remaining}" transform="rotate(-90 24 24)"/>
       </svg>
-      <span class="text-sm text-gray-700 dark:text-gray-300">${pct.toFixed(1)}%</span>
+      <span class="text-sm text-gray-700 dark:text-gray-300">${limit>0?util.toFixed(1)+'%':'Unavailable'}</span>
     </div>
   `;
 }
@@ -1204,16 +1425,23 @@ function renderStrategy(cards, strategy) {
 
 function renderExpensive(cards) {
   if (!expensiveList) return;
-  const ranked = rankByInterestPer100(cards);
+  const ranked = cards
+    .filter(hasBalance)
+    .map((card) => ({
+      ...card,
+      monthlyCost: scenarioCost(card),
+    }))
+    .filter(card=>card.monthlyCost!==null)
+    .sort((a, b) => b.monthlyCost - a.monthlyCost);
   expensiveList.innerHTML = "";
   if (!ranked.length && cards.length) {
     expensiveList.innerHTML =
-      '<p class="text-emerald-700 dark:text-emerald-400">No balances left to rank.</p>';
+      '<p class="text-gray-500 dark:text-gray-400">No eligible balances included. Opt into a single-rate scenario under Statement & planning.</p>';
     return;
   }
   if (!ranked.length) {
     expensiveList.innerHTML =
-      '<button type="button" onclick="focusAddForm()" class="text-gray-500 dark:text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 hover:underline transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded">Add accounts to see per-$100 cost ranking.</button>';
+      '<button type="button" onclick="focusAddForm()" class="text-gray-500 dark:text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 hover:underline transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded">Add accounts to see estimated monthly interest by account.</button>';
     return;
   }
   ranked.slice(0, 6).forEach((r, i) => {
@@ -1225,14 +1453,14 @@ function renderExpensive(cards) {
         <span class="text-lg font-bold text-gray-600 dark:text-gray-400 w-6 shrink-0">${i + 1}.</span>
         <div class="ml-2 min-w-0">
           <p class="font-medium text-gray-900 dark:text-gray-100 break-words leading-snug">${escapeHtml(r.name)}</p>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">APR ${r.apr.toFixed(
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">APR ${(+r.apr || 0).toFixed(
             2
           )}% • Balance ${fmtMoney(r.balance)}</p>
         </div>
       </div>
       <span class="text-sm font-semibold text-rose-700 dark:text-rose-400 shrink-0">${fmtMoney(
-        r.per100
-      )}/$100</span>
+        r.monthlyCost
+      )}/mo</span>
     `;
     expensiveList.appendChild(row);
   });
@@ -1247,7 +1475,7 @@ function renderFicoHints(cards) {
       '<button type="button" onclick="focusAddForm()" class="text-gray-500 dark:text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 hover:underline transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded">Add accounts to see utilization thresholds and “nudge” amounts.</button>';
     return;
   }
-  const { util } = computeTotals(cards);
+  const { util,limit } = computeTotals(cards);
   const {
     over80,
     over50,
@@ -1270,7 +1498,7 @@ function renderFicoHints(cards) {
         <p class="text-xl font-bold">${count}</p>
         ${
           count
-            ? `<p class="text-xs mt-1 opacity-90">Min to tame: ${fmtMoney(minToTame)}</p>`
+            ? `<p class="text-xs mt-1 opacity-90">Amount to reach target: ${fmtMoney(minToTame)}</p>`
             : `<p class="text-xs mt-1 opacity-90">All clear</p>`
         }
       </div>
@@ -1291,12 +1519,8 @@ function renderFicoHints(cards) {
       ${thresholdTile("&gt;30%", over30, sumTo30)}
     </div>
     <div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400 flex flex-wrap gap-x-4 gap-y-1">
-      <span>To reach 50% overall: <span class="font-semibold text-gray-700 dark:text-gray-300">${fmtMoney(
-        to50Overall
-      )}</span></span>
-      <span>To reach 30% overall: <span class="font-semibold text-gray-700 dark:text-gray-300">${fmtMoney(
-        to30Overall
-      )}</span></span>
+      <span>To reach 50% overall: <span class="font-semibold text-gray-700 dark:text-gray-300">${to50Overall===null?'Unavailable':fmtMoney(to50Overall)}</span></span>
+      <span>To reach 30% overall: <span class="font-semibold text-gray-700 dark:text-gray-300">${to30Overall===null?'Unavailable':fmtMoney(to30Overall)}</span></span>
     </div>
   `;
   box.appendChild(summary);
@@ -1306,7 +1530,7 @@ function renderFicoHints(cards) {
     list.className = "mt-3 space-y-2";
     const title = document.createElement("p");
     title.className = "font-medium";
-    title.textContent = "Cheapest “threshold nudges” (FICO optics):";
+    title.textContent = "Payments to utilization targets:";
     list.appendChild(title);
 
     nudges.slice(0, 8).forEach((n) => {
@@ -1327,7 +1551,7 @@ function renderFicoHints(cards) {
     const ok = document.createElement("p");
     ok.className = "text-sm text-emerald-700 dark:text-emerald-400 mt-2";
     ok.textContent =
-      "Nice! No cards above 30%, utilization profile looks healthy.";
+      "No open tracked cards exceed the selected planning targets.";
     box.appendChild(ok);
   }
 }
@@ -1384,7 +1608,15 @@ function downloadFile(name, type, data) {
   a.click();
   URL.revokeObjectURL(url);
 }
-function exportData(format = "csv") {
+async function exportData(format = "csv") {
+  if(!tracking||!cryptoKey){showModal('Locked','Sign in and unlock before exporting.');return;}
+  if(format==='json'||format==='history'){
+    if(unreadableRecords){showModal('Export unavailable','A complete backup cannot be created while accounts are unreadable. Resolve the data warning first.');return;}
+    try{const store=tracking;const backup=await makeBackup(store,cloudCards.filter(c=>!c.deletedAt));store.active();if(store!==tracking)return;backup.settings=uiPreferences;
+      downloadFile(format==='json'?'debt-tracker-backup.json':'debt-tracker-history.csv',format==='json'?'application/json':'text/csv',format==='json'?JSON.stringify(backup,null,2):historyCSV(backup.accounts));
+      toast('Downloaded backup contains decrypted personal financial data. Store it privately.');
+    }catch(error){showModal('Export unavailable',error.message);}return;
+  }
   const rows = window.__latestCards.map((c) => ({
     id: c.id,
     name: c.name,
@@ -1392,25 +1624,9 @@ function exportData(format = "csv") {
     apr: +c.apr || 0,
     creditLimit: +c.creditLimit || 0,
   }));
-  if (format === "json") {
-    downloadFile(
-      "debt-tracker.json",
-      "application/json",
-      JSON.stringify(rows, null, 2)
-    );
-  } else {
-    const header = "id,name,balance,apr,creditLimit";
-    const csv = [
-      header,
-      ...rows.map(
-        (r) =>
-          `${r.id},"${(r.name || "").replace(/"/g, '""')}",${r.balance},${
-            r.apr
-          },${r.creditLimit}`
-      ),
-    ].join("\n");
-    downloadFile("debt-tracker.csv", "text/csv", csv);
-  }
+  const header=['id','name','balance','apr','creditLimit'];
+  downloadFile('debt-tracker.csv','text/csv',[header,...rows.map(row=>header.map(key=>row[key]))].map(row=>row.map(csvCell).join(',')).join('\r\n'));
+
 }
 window.exportData = exportData;
 
@@ -1468,9 +1684,9 @@ function parseCsv(text) {
   for (let i = 1; i < lines.length; i++) {
     const values = parseCsvLine(lines[i]);
     const name = (values[colIndex.name] || "").trim();
-    const balance = parseFloat(values[colIndex.balance]);
-    const apr = parseFloat(values[colIndex.apr]);
-    const creditLimit = parseFloat(values[colIndex.creditLimit]);
+    const balance = parseDecimalInput(values[colIndex.balance]);
+    const apr = parseDecimalInput(values[colIndex.apr]);
+    const creditLimit = parseDecimalInput(values[colIndex.creditLimit]);
     const fieldErrors = validateCardInput({ name, balance, apr, creditLimit });
     if (Object.keys(fieldErrors).length) {
       errors.push(`Row ${i + 1}: ${Object.values(fieldErrors).join(" ")}`);
@@ -1501,9 +1717,9 @@ function parseJson(text) {
   const errors = [];
   arr.forEach((entry, i) => {
     const name = (entry?.name ?? "").toString().trim();
-    const balance = parseFloat(entry?.balance);
-    const apr = parseFloat(entry?.apr);
-    const creditLimit = parseFloat(entry?.creditLimit);
+    const balance = parseDecimalInput(entry?.balance);
+    const apr = parseDecimalInput(entry?.apr);
+    const creditLimit = parseDecimalInput(entry?.creditLimit);
     const fieldErrors = validateCardInput({ name, balance, apr, creditLimit });
     if (Object.keys(fieldErrors).length) {
       errors.push(`Item ${i + 1}: ${Object.values(fieldErrors).join(" ")}`);
@@ -1528,13 +1744,25 @@ importCsvInput?.addEventListener("change", async () => {
     return;
   }
 
+  const importStore=tracking;
+  if(file.size>10*1024*1024){showModal('Import failed','Choose a backup smaller than 10 MB.');return;}
   const text = await file.text();
+  if(!importStore||tracking!==importStore||!importStore.isActive())return;
+  try{const raw=JSON.parse(text);if(raw?.format===BACKUP_FORMAT){
+    const backup=validateBackup(raw);const {dialog,body}=trackingDialog('Review backup restore');
+    body.append(uiElement('p',`${backup.accounts.length} accounts and ${backup.accounts.reduce((sum,row)=>sum+row.events.length,0)} history records. Existing conflicting accounts are skipped unless you explicitly replace them.`));
+    for(const row of backup.accounts)body.append(uiElement('p',`${row.account.name}: ${fmtMoney(row.account.balance)}${cloudCards.some(c=>c.id===row.id)?' (already tracked)':''}`));
+    const label=uiElement('label');const replace=uiElement('input');replace.type='checkbox';label.append(replace,document.createTextNode(' Replace current snapshots for matching account IDs'));body.append(label);
+    body.append(uiButton('Restore reviewed backup',async()=>{try{const store=tracking;const result=await restoreBackup(store,backup,cloudCards,{replace:replace.checked});store.active();if(store!==tracking)return;uiPreferences=preferences(backup.settings);savePreferences();dialog.close();await refreshTrackingView();toast(`Restore queued: ${result.restored} accounts, ${result.skipped} conflicts skipped.`);}catch(error){showModal('Restore failed',error.message);}}));return;
+  }}catch(error){if(text.includes('"format"')){showModal('Import failed',error.message);return;}}
+
   const isJson =
     /\.json$/i.test(file.name) ||
     file.type === "application/json" ||
     text.trim().startsWith("[") ||
     text.trim().startsWith("{");
   const { rows, errors } = isJson ? parseJson(text) : parseCsv(text);
+  if(rows.length>1000){showModal('Import failed','Import at most 1,000 accounts at a time.');return;}
 
   if (!rows.length) {
     showModal(
@@ -1552,8 +1780,9 @@ importCsvInput?.addEventListener("change", async () => {
   );
   let imported = 0;
   for (const row of rows) {
+    if(tracking!==importStore||!importStore.isActive())return;
     try {
-      await setDoc(doc(cardsCollection), await encryptFields(row));
+      await saveTracked(null,makeObservation(null,{...row,entryMethod:'direct',effectiveDate:localDate()}).account,'import');
       imported++;
     } catch (err) {
       console.error("[Import] Row failed:", err);
@@ -1577,246 +1806,156 @@ importCsvInput?.addEventListener("change", async () => {
 
 // ====== EVENTS ======
 
-// Add account (top form)
-form?.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const name = document.getElementById("card-name").value.trim();
-  const balance = parseFloat(document.getElementById("balance").value);
-  const apr = parseFloat(document.getElementById("apr").value);
-  const creditLimit = parseFloat(document.getElementById("limit").value);
-
-  const errors = validateCardInput({ name, balance, apr, creditLimit });
-  const firstInvalid = applyFieldErrors(errors, TOP_FORM_FIELD_MAP);
-  if (firstInvalid) {
-    firstInvalid.focus();
-    return;
-  }
-  if (!userId) {
-    showModal("Authentication", "Please sign in to add accounts.");
-    return;
-  }
-
-  const cardsCollection = collection(
-    db,
-    `artifacts/${appId}/users/${userId}/cards`
-  );
-  const prevText = submitBtn.textContent;
-  try {
-    submitBtn.disabled = true;
-    submitBtn.textContent = "Adding…";
-    await setDoc(
-      doc(cardsCollection),
-      await encryptFields({ name, balance, apr, creditLimit })
-    );
-    toast("Account added");
-    form.reset();
-    applyFieldErrors({}, TOP_FORM_FIELD_MAP);
-  } catch (err) {
-    console.error("[Save] Add failed:", err);
-    showModal("Error", "Could not save the account.");
-  } finally {
-    submitBtn.disabled = false;
-    submitBtn.textContent = prevText;
-  }
+// Add and edit through one encrypted mutation service.
+function readEntry(root, prior=null) {
+  const top=root===form;
+  const ids={name:'card-name',balance:'balance',apr:'apr',creditLimit:'limit',availableCredit:'available-credit',entryMethod:'entry-method',effectiveDate:'observation-date',note:'account-note',reason:'account-reason'};
+  const get=key=>top?document.getElementById(ids[key])?.value:root.querySelector(`[data-field="${key}"]`)?.value;
+  return makeObservation(prior,{name:(get('name')??'').trim(),apr:get('apr'),creditLimit:get('creditLimit'),
+    availableCredit:get('availableCredit'),balance:get('balance'),entryMethod:get('entryMethod')??'direct',
+    effectiveDate:get('effectiveDate')||localDate(),note:get('note')??prior?.note??'',reason:get('reason')??'',
+    confirmObservation:root.querySelector('[data-field="confirmObservation"]')?.checked===true,
+  });
+}
+function refreshEntry(root) {
+  const top=root===form;
+  const find=key=>top?document.getElementById({entryMethod:'entry-method',balance:'balance',availableCredit:'available-credit',creditLimit:'limit'}[key]):root.querySelector(`[data-field="${key}"]`);
+  const balance=find('balance'),available=find('availableCredit'),method=find('entryMethod')?.value??'direct';
+  if(!balance)return;
+  balance.readOnly=method==='availableCredit';available?.closest('label, .entry-available')?.classList.toggle('hidden',method!=='availableCredit');
+  const preview=top?document.getElementById('balance-preview'):root.querySelector('.balance-preview');
+  if(method==='availableCredit'){
+    try{const estimate=estimateBalance(find('creditLimit').value,available.value);balance.value=(estimate.balanceCents/100).toFixed(2);if(preview)preview.textContent=estimate.availableExceedsLimit?'Available credit exceeds limit; verify issuer values.':estimate.atCapacity?'No available credit. An over-limit amount cannot be determined from this alone.':'Estimated balance = limit minus available credit.';}
+    catch{balance.value='';if(preview)preview.textContent='Enter limit and available credit to preview the estimated balance.';}
+  } else if(preview)preview.textContent='Direct balance entry. Use for legacy records or over-limit exceptions.';
+}
+form?.addEventListener('input',()=>refreshEntry(form));
+form?.addEventListener('change',()=>refreshEntry(form));
+form?.addEventListener('submit',async e=>{
+  e.preventDefault();submitBtn.disabled=true;addAccountError.textContent='';
+  try{const result=readEntry(form);await saveTracked(null,result.account,'add');resetAddAccountForm();addAccountDialog.close();toast('Account saved; sync status shown above.');}
+  catch(error){if(addAccountDialog.open){addAccountError.textContent=error.message||'Could not save the account.';addAccountError.scrollIntoView({block:'nearest'});}}
+  finally{submitBtn.disabled=false;}
 });
-
-// Inline edit + delete (with Undo)
-cardList?.addEventListener("click", async (e) => {
-  const editBtn = e.target.closest(".inline-edit-btn");
-  const cancelBtn = e.target.closest(".cancel-inline-btn");
-  const saveBtn = e.target.closest(".save-inline-btn");
-  const deleteBtn = e.target.closest(".delete-btn");
-  const nudgeBtn = e.target.closest(".nudge-btn");
-
-  if (nudgeBtn) {
-    if (!userId) {
-      showModal("Authentication", "Please sign in to update accounts.");
-      return;
-    }
-    const id = nudgeBtn.dataset.id;
-    const delta = +nudgeBtn.dataset.delta || 0;
-    const card = window.__latestCards.find((c) => c.id === id);
-    if (!card) return;
-    const newBalance = Math.max(
-      0,
-      Math.round(((+card.balance || 0) + delta) * 100) / 100
-    );
-
-    const cardsCollection = collection(
-      db,
-      `artifacts/${appId}/users/${userId}/cards`
-    );
-    nudgeBtn.disabled = true;
-    try {
-      await setDoc(
-        doc(cardsCollection, id),
-        await encryptFields({
-          name: card.name,
-          balance: newBalance,
-          apr: card.apr,
-          creditLimit: card.creditLimit,
-        })
-      );
-      card.balance = newBalance;
-      toast(delta < 0 ? "Balance decreased by $50" : "Balance increased by $50");
-      renderCards(window.__latestCards);
-    } catch (err) {
-      console.error("[Nudge] Update failed:", err);
-      showModal("Error", "Could not update the balance. Please try again.");
-      nudgeBtn.disabled = false;
-    }
-    return;
-  }
-
-  if (editBtn) {
-    editingId = editBtn.dataset.id;
-    renderCards(window.__latestCards);
-    cardList
-      .querySelector(`.save-inline-btn[data-id="${editingId}"]`)
-      ?.closest(".debt-card")
-      ?.querySelector("input[data-field]")
-      ?.focus();
-    return;
-  }
-  if (cancelBtn) {
-    editingId = null;
-    renderCards(window.__latestCards);
-    return;
-  }
-  if (saveBtn) {
-    const id = saveBtn.dataset.id;
-    const cardEl = saveBtn.closest(".debt-card");
-    if (!cardEl) return;
-
-    const getVal = (sel) => {
-      const inp = cardEl.querySelector(`input[data-field="${sel}"]`);
-      return inp ? inp.value : null;
-    };
-    const name = (getVal("name") || "").trim();
-    const balance = parseFloat(getVal("balance"));
-    const apr = parseFloat(getVal("apr"));
-    const creditLimit = parseFloat(getVal("creditLimit"));
-
-    const errors = validateCardInput({ name, balance, apr, creditLimit });
-    const inlineFieldMap = {
-      name: {
-        input: () => cardEl.querySelector('input[data-field="name"]'),
-        error: () => cardEl.querySelector('[data-error-for="name"]'),
-      },
-      balance: {
-        input: () => cardEl.querySelector('input[data-field="balance"]'),
-        error: () => cardEl.querySelector('[data-error-for="balance"]'),
-      },
-      apr: {
-        input: () => cardEl.querySelector('input[data-field="apr"]'),
-        error: () => cardEl.querySelector('[data-error-for="apr"]'),
-      },
-      creditLimit: {
-        input: () => cardEl.querySelector('input[data-field="creditLimit"]'),
-        error: () => cardEl.querySelector('[data-error-for="creditLimit"]'),
-      },
-    };
-    const firstInvalid = applyFieldErrors(errors, inlineFieldMap);
-    if (firstInvalid) {
-      firstInvalid.focus();
-      return;
-    }
-    if (!userId) {
-      showModal("Authentication", "Please sign in to edit accounts.");
-      return;
-    }
-
-    const updated = { name, balance, apr, creditLimit };
-    const cardsCollection = collection(
-      db,
-      `artifacts/${appId}/users/${userId}/cards`
-    );
-    const prevHTML = saveBtn.innerHTML;
-
-    try {
-      saveBtn.disabled = true;
-      saveBtn.innerHTML = "Saving…";
-      await setDoc(doc(cardsCollection, id), await encryptFields(updated));
-
-      editingId = null;
-      toast("Account updated");
-
-      // Optimistic render
-      const idx = window.__latestCards.findIndex((c) => c.id === id);
-      if (idx !== -1)
-        window.__latestCards[idx] = {
-          ...window.__latestCards[idx],
-          ...updated,
-        };
-      renderCards(window.__latestCards);
-    } catch (err) {
-      console.error("[Save] Inline save failed:", err);
-      showModal("Error", "Saving failed. Please try again.");
-      if (saveBtn.isConnected) {
-        saveBtn.disabled = false;
-        saveBtn.innerHTML = prevHTML;
+cardList?.addEventListener('toggle',e=>{
+  if(!e.target.matches('.account-menu[open]'))return;
+  cardList.querySelectorAll('.account-menu[open]').forEach(menu=>{if(menu!==e.target)menu.open=false;});
+},true);
+cardList?.addEventListener('keydown',e=>{
+  if(e.key!=='Escape')return;
+  const menu=e.target.closest('.account-menu[open]');if(!menu)return;
+  menu.open=false;menu.querySelector('summary').focus();e.preventDefault();
+});
+cardList?.addEventListener('input',e=>{const card=e.target.closest('.debt-card');if(card)refreshEntry(card);});
+cardList?.addEventListener('change',e=>{const card=e.target.closest('.debt-card');if(card)refreshEntry(card);});
+cardList?.addEventListener('click',async e=>{
+  const button=e.target.closest('button[data-id]');if(!button)return;
+  const id=button.dataset.id;
+  const card=window.__latestCards.find(c=>c.id===id);if(!card)return;
+  if(button.classList.contains('inline-edit-btn')){editingBase=structuredClone(card);editingId=id;renderCards(window.__latestCards);cardList.querySelector('.save-inline-btn')?.closest('.debt-card')?.querySelector('input')?.focus();return;}
+  if(button.classList.contains('cancel-inline-btn')){editingId=null;editingBase=null;renderCards(window.__latestCards);return;}
+  button.disabled=true;
+  try{
+    if(button.classList.contains('save-inline-btn')){
+      const base=editingBase??card;const result=readEntry(button.closest('.debt-card'),base);
+      await saveTracked(base,result.account,result.historical?'historical-observation':result.observed?'observation':'edit',result.historical?{observation:result.observation}:{});
+      editingId=null;renderAll(window.__latestCards);toast(result.historical?'Historical observation saved; latest values retained.':'Update saved; sync status shown above.');
+    }else if(button.classList.contains('nudge-btn')){
+      const newBalance=Math.max(0,Math.round((card.balance+Number(button.dataset.delta))*100)/100);
+      const input={...fieldsOf(card),entryMethod:card.entryMethod??'direct',effectiveDate:localDate(),confirmObservation:true,balance:newBalance};
+      if(input.entryMethod==='availableCredit'){
+        if(newBalance>card.creditLimit)throw new Error('This adjustment exceeds the limit. Use direct entry for the over-limit amount.');
+        input.availableCredit=Math.round((card.creditLimit-newBalance)*100)/100;
       }
+      const result=makeObservation(card,input);await saveTracked(card,result.account,'adjustment',{appliedChange:Math.round((newBalance-card.balance)*100)});
+      toast('Balance adjustment saved.');
+    }else if(button.classList.contains('refresh-observation')){
+      const result=makeObservation(card,{...fieldsOf(card),entryMethod:card.entryMethod??'direct',effectiveDate:localDate(),confirmObservation:true});
+      await saveTracked(card,result.account,'observation');toast('Current values recorded as observed today.');
+    }else if(button.classList.contains('delete-btn')){
+      const owner=tracking;
+      if(!await confirmAction('Delete account?',`Delete ${card.name} and its history? You can undo for 8 seconds; after that, permanent cleanup begins.`,'Delete account')||owner!==tracking)return;
+      const after={...trackingFields(card),deletedAt:new Date().toISOString()};
+      const deleted=await saveTracked(card,after,'delete');
+      const ownerStore=tracking;
+      const undo=document.createElement('div');undo.className='tracker-undo';undo.textContent='Account removed. ';
+      const restore=document.createElement('button');restore.className='tracker-button';restore.textContent='Undo';undo.append(restore);document.body.append(undo);
+      restore.onclick=async()=>{if(ownerStore!==tracking)return;restore.disabled=true;try{await saveTracked(deleted,{...after,deletedAt:null},'restore');undo.remove();}catch(error){showModal('Restore failed',error.message);restore.disabled=false;}};
+      setTimeout(()=>undo.remove(),8000);
     }
-    return;
-  }
-  if (deleteBtn) {
-    if (!userId) {
-      showModal("Authentication", "Please sign in to delete accounts.");
-      return;
-    }
-    const id = deleteBtn.dataset.id;
-    const cardsCollection = collection(
-      db,
-      `artifacts/${appId}/users/${userId}/cards`
-    );
-
-    const snapshot = window.__latestCards.find((c) => c.id === id);
-    if (!snapshot) {
-      return;
-    }
-
-    try {
-      await deleteDoc(doc(cardsCollection, id));
-      announce("Account deleted. Undo available.");
-      let undone = false;
-
-      const undoEl = document.createElement("div");
-      undoEl.className =
-        "fixed bottom-4 right-4 z-[1100] bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-lg ring-1 ring-white/10 flex items-center gap-3";
-      undoEl.innerHTML = `<span>Account deleted</span>
-        <button class="px-2 py-1 bg-white text-gray-900 rounded hover:bg-gray-100 text-xs font-medium" id="undo-delete">Undo</button>`;
-      document.body.appendChild(undoEl);
-
-      const timer = setTimeout(() => {
-        if (undoEl.isConnected) undoEl.remove();
-      }, 8000);
-
-      undoEl
-        .querySelector("#undo-delete")
-        .addEventListener("click", async () => {
-          if (undone) return;
-          undone = true;
-          clearTimeout(timer);
-          if (undoEl.isConnected) undoEl.remove();
-
-          await setDoc(
-            doc(cardsCollection, id),
-            await encryptFields({
-              name: snapshot.name,
-              balance: snapshot.balance,
-              apr: snapshot.apr,
-              creditLimit: snapshot.creditLimit,
-            })
-          );
-          toast("Delete undone");
-        });
-    } catch (err) {
-      console.error("[Delete] Delete failed:", err);
-      showModal("Error", "Delete failed. Please try again.");
-    }
-    return;
-  }
+  }catch(error){showModal('Not saved',error.message||'Please try again.');}
+  finally{if(button.isConnected)button.disabled=false;}
 });
+function trackingFields(card){
+  if(card.schemaVersion===2)return fieldsOf(card);
+  const result=makeObservation(card,{...fieldsOf(card),entryMethod:'direct',effectiveDate:localDate()});
+  return result.account;
+}
+cardList?.addEventListener('click',async e=>{
+ const button=e.target.closest('[data-account-action]');if(!button)return;
+ const card=window.__latestCards.find(c=>c.id===button.dataset.id);if(!card||!tracking)return;
+ const owner=tracking;
+ button.closest('details')?.removeAttribute('open');
+ try{
+  if(['archive','status'].includes(button.dataset.accountAction)){
+   const archive=button.dataset.accountAction==='archive';
+   const title=archive?(card.archived?'Unarchive account?':'Archive account?'):(card.status==='closed'?'Mark account issuer-open?':'Mark account issuer-closed?');
+   const explanation=archive?(card.archived?'This returns the account to your usual account list. Its history and totals stay intact.':'This hides the account from your usual list. Its balance remains in totals and its history is preserved.'):(card.status==='closed'?'This includes its limit in open-account utilization again. No balance or history is removed.':'Use this when the issuer has closed the account. Outstanding debt stays tracked; its limit is excluded from open-account utilization.');
+   if(!await confirmAction(title,card.name+'. '+explanation,archive?(card.archived?'Unarchive':'Archive'):(card.status==='closed'?'Mark issuer-open':'Mark issuer-closed'))||owner!==tracking)return;
+  }
+  const context={save:saveTracked,trackingFields,getCard:id=>window.__latestCards.find(c=>c.id===id),cards:()=>window.__latestCards};
+  if(button.dataset.accountAction==='planning'){await showPlanning(tracking,card,context);return;}
+  if(button.dataset.accountAction==='payment'){showPayment(tracking,card,context);return;}
+  if(button.dataset.accountAction==='transfer'){showTransfer(tracking,card,context);return;}
+  if(button.dataset.accountAction==='history')await showHistory(tracking,card,event=>correctObservation(card.id,event));
+  else if(button.dataset.accountAction==='archive')await saveTracked(card,{...trackingFields(card),archived:!card.archived,updatedAt:new Date().toISOString()},'archive');
+  else if(button.dataset.accountAction==='status')await saveTracked(card,{...trackingFields(card),status:card.status==='closed'?'open':'closed',updatedAt:new Date().toISOString()},'status');
+ }catch(error){showModal('Not saved',error.message);}
+});
+function correctObservation(id,event){
+ const observation=event.details?.observation??event.after;
+ const {dialog,body}=trackingDialog('Correct an observation');
+ body.append(uiElement('p','This replaces an incorrect historical entry. It is not a new balance reduction.'));
+ const form=uiElement('form');
+ for(const [key,label,type,value] of [['name','Account name','text',observation.name],['entryMethod','Entry method','select',observation.entryMethod??'direct'],['creditLimit','Credit limit','number',observation.creditLimit],['availableCredit','Available credit','number',observation.availableCredit??''],['balance','Direct balance','number',observation.balance],['apr','APR','number',observation.apr],['effectiveDate','Observed on','date',observation.effectiveDate??localDate()],['note','Note','text',observation.note??'']]){
+  const wrap=uiElement('label',label);const input=uiElement(type==='select'?'select':'input');input.dataset.field=key;input.className='tracker-input';
+  if(type==='select')for(const method of ['availableCredit','direct']){const option=uiElement('option',method==='direct'?'Enter balance directly':'Calculate from available credit');option.value=method;input.append(option);}else{input.type=type;if(type==='number'){input.min='0';input.step='0.01';}}
+  input.value=String(value);wrap.append(input);form.append(wrap);
+ }
+ const confirm=uiElement('input');confirm.type='checkbox';confirm.checked=true;confirm.hidden=true;confirm.dataset.field='confirmObservation';form.append(confirm);
+ const save=uiButton('Save correction',null);save.type='submit';form.append(save);form.oninput=()=>refreshEntry(form);refreshEntry(form);
+ form.onsubmit=async e=>{e.preventDefault();save.disabled=true;try{
+  const current=window.__latestCards.find(c=>c.id===id);if(!current)throw new Error('Account is no longer available.');
+  const candidate=readEntry(form,observation).observation;
+  const isLatest=current.balanceObservedAt===observation.balanceObservedAt&&current.effectiveDate===observation.effectiveDate;
+  const after=isLatest?{...trackingFields(current),...candidate}:{...trackingFields(current),updatedAt:new Date().toISOString()};
+  await saveTracked(current,after,'correction',{correctionOf:event.id,observation:candidate});dialog.close();
+ }catch(error){showModal('Correction not saved',error.message);save.disabled=false;}};
+ body.append(form);
+}
+function savePreferences(){
+ uiPreferences=preferences(uiPreferences);
+ try{localStorage.setItem(`pdt-preferences:${appId}:${userId}`,JSON.stringify(uiPreferences));}catch{}
+ document.getElementById('utilization-targets').value=uiPreferences.targets.join(', ');
+ document.getElementById('stale-days').value=uiPreferences.staleDays;
+ document.getElementById('promotion-warning-days').value=uiPreferences.warningDays;
+}
+document.getElementById('save-utilization-targets')?.addEventListener('click',()=>{
+ try{uiPreferences=preferences({...uiPreferences,targets:document.getElementById('utilization-targets').value.split(',').map(value=>value.trim())});savePreferences();renderAll(window.__latestCards);}catch(error){showModal('Invalid targets',error.message);}
+});
+for(const id of ['show-archived','stale-only','stale-days'])document.getElementById(id)?.addEventListener('change',()=>{try{uiPreferences=preferences({...uiPreferences,staleDays:Number(document.getElementById('stale-days').value)});savePreferences();renderCards(window.__latestCards);}catch(error){showModal('Invalid interval',error.message);}});
+function renderReminders(cards){
+ const box=document.getElementById('upcoming-reminders');if(!box)return;box.replaceChildren();
+ const days=Number(document.getElementById('promotion-warning-days')?.value)||7;
+ for(const card of cards)for(const reminder of reminders(card,localDate(),days)){
+  const row=uiElement('div',null,'tracker-history-row');row.append(uiElement('p',`${card.name} | ${reminder.date} | ${reminder.text}`));
+  row.append(uiButton('Review account',()=>showPlanning(tracking,card,{save:saveTracked,trackingFields,getCard:id=>window.__latestCards.find(c=>c.id===id),cards:()=>window.__latestCards})));box.append(row);
+ }
+ if(!box.childNodes.length)box.textContent='No statement deadlines or approaching promotion dates recorded. Add them under Statement & planning on an account.';
+}
+document.getElementById('promotion-warning-days')?.addEventListener('change',()=>{try{uiPreferences=preferences({...uiPreferences,warningDays:Number(document.getElementById('promotion-warning-days').value)});savePreferences();renderReminders(window.__latestCards);}catch(error){showModal('Invalid interval',error.message);}});
+if(document.getElementById('observation-date'))document.getElementById('observation-date').value=localDate();
+refreshEntry(form);
 
 // Keyboard shortcuts (Enter=Save, Esc=Cancel)
 cardList?.addEventListener("keydown", (e) => {
@@ -1916,6 +2055,8 @@ googleSigninBtn?.addEventListener("click", async () => {
 
 signOutBtn?.addEventListener("click", async () => {
   try {
+    clearUnlockedState();
+    userId = null;
     // Tear down the live listener FIRST so it can't fire a post-sign-out
     // permission error that would re-show the data view.
     if (unsubscribe) {
@@ -2016,17 +2157,17 @@ btRunBtn?.addEventListener("click", () => {
     <p>Total Transfer: <span class="font-semibold">${fmtMoney(
       result.totalTransfer
     )}</span></p>
-    <p>Monthly Interest Saved: <span class="font-semibold">${fmtMoney(
+    <p>Hypothetical monthly interest reduction: <span class="font-semibold">${fmtMoney(
       result.totalMonthlySaved
     )}</span></p>
-    <p>Intro Savings (months ${months}) vs Fees: <span class="font-semibold">${fmtMoney(
+    <p>Scenario over intro period (months ${months}) vs Fees: <span class="font-semibold">${fmtMoney(
     result.totalIntroSaved
   )} saved • ${fmtMoney(result.totalFees)} fees</span></p>
     <p class="${
       result.netIntroSavings >= 0
         ? "text-emerald-700 dark:text-emerald-400"
         : "text-rose-700 dark:text-rose-400"
-    }">Net Savings Over Intro: <span class="font-semibold">${fmtMoney(
+    }">Hypothetical net benefit over intro: <span class="font-semibold">${fmtMoney(
     result.netIntroSavings
   )}</span></p>
   `;
@@ -2102,8 +2243,8 @@ simRunBtn?.addEventListener("click", () => {
   hdr.className =
     "p-3 bg-white dark:bg-gray-900 rounded-md border border-gray-200 dark:border-gray-800";
   hdr.innerHTML = `
-    <p>Debt-free in: <span class="font-semibold">${durationText}</span> <span class="text-xs text-gray-500 dark:text-gray-400">(~${payoffDateText})</span></p>
-    <p>Total Interest Paid: <span class="font-semibold text-rose-700 dark:text-rose-400">${fmtMoney(
+    <p>Simulated payoff time: <span class="font-semibold">${durationText}</span> <span class="text-xs text-gray-500 dark:text-gray-400">(~${payoffDateText})</span></p>
+    <p>Simulated total interest: <span class="font-semibold text-rose-700 dark:text-rose-400">${fmtMoney(
       result.totalInterest
     )}</span></p>
   `;
@@ -2162,11 +2303,14 @@ const navSections = navLinks
   .filter(Boolean);
 
 function setActiveNav(id) {
+  if(location.hash==='#progress')id='progress';
   navLinks.forEach((link) => {
     const isActive = link.getAttribute("href") === `#${id}`;
     NAV_ACTIVE_CLASSES.forEach((c) => link.classList.toggle(c, isActive));
+    if(isActive)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');
   });
 }
+window.addEventListener('hashchange',()=>setActiveNav(location.hash==='#progress'?'progress':location.hash.slice(1)));
 
 if (navSections.length && "IntersectionObserver" in window) {
   const spy = new IntersectionObserver(
@@ -2193,4 +2337,5 @@ const footerYear = document.getElementById("footer-year");
 if (footerYear) footerYear.textContent = new Date().getFullYear();
 
 // ====== BOOT ======
+progressPage=new ProgressPage({getStore:()=>tracking,getCards:()=>cloudCards});
 initFirebase();

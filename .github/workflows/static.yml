@@ -23,15 +23,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Check and test
+        run: |
+          npm ci
+          npm run build:css
+          npm run check
+          npm test
+
       - name: Build static site
         run: |
-          mkdir -p dist
-          # copy everything except git/meta and any local env.js
-          rsync -av --delete \
-            --exclude ".git*" \
-            --exclude ".github" \
-            --exclude "env.js" \
-            ./ dist/
+          # Explicit runtime allowlist: private/local files and tests cannot leak
+          # into the public Pages artifact through a broad repository copy.
+          mkdir -p dist/src
+          cp index.html app.js styles.css sw.js manifest.webmanifest icon.svg dist/
+          cp src/*.mjs dist/src/
 
       - name: Generate env.js from secrets
         run: |

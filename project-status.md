@@ -1,3 +1,42 @@
+## 2026-10-25 - Sticky navigation and modal account entry
+
+- Made the header sticky with an opaque theme-aware background and measured
+  anchor offsets, so section navigation accounts for header wrapping.
+- Moved Add Account into a native modal with inline errors, Cancel/Escape,
+  focus management, scrollable fields and always-visible submission controls.
+  All add shortcuts open the same dialog; closing or signing out clears drafts.
+- Moved sort/display controls under My Accounts and grouped them with filters
+  in a labelled bordered panel and an internal separator. Styled every Actions
+  operation as a bordered button, with a distinct delete treatment.
+- Verified 55 unit checks and all three browser suites, including modal
+  validation/cancellation, private draft clearing, sticky positioning, visible
+  modal controls and narrow layouts. Reviewed dark mobile screenshots. Cache v12.
+  Local branch only; no push or deployment.
+
+## 2026-10-25 - Account controls and dark-mode usability
+
+- Made Update balance and View history the visible card actions. Grouped planning,
+  payment/transfer records, observation confirmation and lifecycle actions under
+  an accessible Actions disclosure; all existing capabilities remain available.
+- Added confirmation dialogs for archive/unarchive, issuer-status changes and
+  deletion, with Cancel focused first and unchanged Undo/history behavior.
+  Account names are inserted as text, and session changes cancel pending actions.
+- Padded and centered day inputs with consistent dark-mode colors; spaced checkbox
+  labels and aligned wrapped text across filters, inline editing and dialogs.
+- Verified 55 unit checks and three browser suites, including cancellation,
+  issuer-status preservation of debt, keyboard controls and dark/mobile styling.
+  Visually reviewed dark mobile cards, Actions and planning references. Cache v11.
+  Local branch only; no push or deployment.
+
+## 2026-10-25 - Recover account loading after unlock
+
+- Extended authenticated HTTPS fallback to account and history reads; added an
+  account refresh/error panel and owner-scoped encrypted offline snapshots.
+- Fixed history queries to filter the encrypted envelope version before
+  descending document ordering; verified REST cursor behavior with the emulator.
+- Verified 55 unit checks, 10 emulator rule checks and three browser suites.
+  Service-worker cache v10. Local only; real signed-in retry remains to verify.
+
 # Project Status — Personal Debt Tracker
 
 A dated, reverse-chronological log of changes. **Newest entries go on top.**
@@ -7,6 +46,60 @@ Legend: ✅ shipped to `main` (live) · 🚧 on a branch, not yet merged ·
 🐛 bug fix · 🔒 security · 📝 docs
 
 ---
+
+## 2026-10-25
+
+### Passphrase startup recovery - feature branch (local only)
+
+- After a confirmed SDK metadata timeout, added an authenticated HTTPS fallback
+  and proxy-compatible long polling. The fallback retains Firebase owner rules
+  and caches only salt/encrypted verifier, never passphrases, keys, or ID tokens.
+- Verified direct fallback with stalled SDK/cache reads in the startup browser
+  suite and real signed-out SDK initialization. Service-worker cache is now v9.
+
+- Returning users can load an existing cached salt/verifier without waiting on
+  a stalled server request. Server-only confirmation is required for new setup.
+- Added a bounded metadata wait, a visible loading/error state, and Retry, plus
+  session guards and a transaction that prevents overwriting existing settings.
+- Updated the local server to recognize new runtime modules without a restart;
+  cached assets now use v8. No passphrases, keys, or live account data were changed.
+- Verified stalled-load/retry/cached-unlock browser paths and setup race/session
+  regressions. Real signed-out SDK startup was checked separately.
+
+### Account tracking stages 2-7 - `feature/account-tracking-progress` (local only)
+
+- Implemented encrypted snapshot/history transactions, revision conflicts,
+  an encrypted offline outbox, and owner-only immutable-history rules.
+- Added calculated available-credit entry, dated observations/corrections,
+  freshness filters, archive/issuer status, Undo and bounded permanent purge.
+- Added complete JSON history backup/restore, stable-identity deduplication,
+  safe snapshot/history CSV exports, and user-scoped UI preferences.
+- Added manual statement/promotion reminders, optional payment records, atomic
+  linked transfers, provisional adjustments, and explicit interest scenarios.
+- Added the Progress page with comparable balance KPIs, observation graphs,
+  accessible tables, comparison bars, utilization/limit views, and milestones.
+- Verified with synthetic browser and local Firestore emulator checks; real
+  Google sign-in, live rules, real-account sync, and hosting remain rollout checks.
+- Deployment remains unperformed; see `docs/tracking-release.md`.
+
+## 2026-10-24
+
+### Account tracking foundation - `feature/account-tracking-progress` (local only)
+
+- Committed the agreed implementation plan separately before implementation.
+- Added integer-cent calculations for available-credit estimates, utilization
+  targets, and balance changes, plus versioned account readers and legacy fixtures.
+- Extracted bounded AES-GCM account serialization while retaining existing keys,
+  envelopes, and legacy account values. Future calculated-account metadata stays
+  inside ciphertext; the new entry forms and history writes are not enabled yet.
+- Added session guards so stale asynchronous reads cannot restore account data
+  after sign-out or replace a newer snapshot. Clear unlocked account views on
+  authentication changes and reject malformed numeric input at save/import.
+- Added dependency-free Node tests and CI checks; restricted service-worker caching
+  and public deployment artifacts to application assets.
+- Verified with unit/crypto/session tests, syntax checks, source checks, and local
+  HTTP module delivery. No authenticated browser, live Firebase rules, or cloud
+  deployment verification has been performed for this stage.
 
 ## 2026-07-25
 

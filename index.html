@@ -122,7 +122,7 @@
     >
       <!-- Top Nav -->
       <header
-        class="flex flex-wrap items-center justify-between gap-3 mb-6 border-b border-gray-200 dark:border-gray-800 pb-3"
+        class="app-header flex flex-wrap items-center justify-between gap-3 mb-6 border-b border-gray-200 dark:border-gray-800"
       >
         <div class="flex items-center gap-2">
           <div
@@ -139,6 +139,7 @@
         </div>
 
         <nav aria-label="Primary" class="flex flex-wrap gap-2 text-sm">
+          <a href="#progress" class="nav-link tracker-button">Progress</a>
           <a
             href="#accounts"
             class="nav-link px-3 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
@@ -147,7 +148,7 @@
           <a
             href="#hints"
             class="nav-link px-3 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
-            >Score Hints</a
+            >Utilization Targets</a
           >
           <a
             href="#strategies"
@@ -254,6 +255,11 @@
 
       <!-- Lock Mode: passphrase setup / unlock (shown between sign-in and app) -->
       <section id="lock-section" class="hidden max-w-md mx-auto mb-8">
+        <div id="lock-loading" class="hidden tracker-status">
+          <h2 class="text-xl font-semibold">Unlock your data</h2>
+          <p id="lock-loading-status" role="status" aria-live="polite">Loading your encryption settings...</p>
+          <button id="lock-retry" type="button" class="hidden tracker-button">Retry loading settings</button>
+        </div>
         <!-- First-time setup -->
         <div id="lock-setup" class="hidden">
           <div class="flex items-center gap-2 mb-2">
@@ -347,6 +353,10 @@
       </section>
 
       <!-- Loading skeleton (shown while first Firestore snapshot loads) -->
+      <section id="account-connection" class="hidden mb-4 rounded-xl border p-4" role="status">
+        <p id="account-connection-message"></p>
+        <button id="account-refresh" type="button" class="mt-2 px-3 py-2 rounded-lg border">Refresh accounts</button>
+      </section>
       <section id="app-loading" class="hidden" aria-hidden="true">
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
           <div class="h-20 rounded-lg bg-gray-200 dark:bg-gray-800 animate-pulse"></div>
@@ -362,6 +372,9 @@
 
       <!-- Main App UI -->
       <main id="main-app" class="hidden">
+        <div id="sync-status" class="tracker-status" role="status" aria-live="polite"></div>
+        <p id="data-quality-notice" class="tracker-help" role="alert"></p>
+        <div id="dashboard-view">
         <!-- KPI Tiles -->
         <section class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-3">
           <div
@@ -376,7 +389,7 @@
             </div>
             <div class="min-w-0">
               <p class="text-xs uppercase tracking-wide text-sky-700 dark:text-sky-400">
-                Total Debt
+                Total Estimated Balance
               </p>
               <p id="total-debt" class="text-2xl font-bold text-sky-900 dark:text-sky-200">
                 $0.00
@@ -396,7 +409,7 @@
             </div>
             <div class="min-w-0">
               <p class="text-xs uppercase tracking-wide text-indigo-700 dark:text-indigo-400">
-                Total Credit
+                Open / Unknown Credit Limits
               </p>
               <p
                 id="total-credit-line"
@@ -419,7 +432,7 @@
             </div>
             <div class="min-w-0">
               <p class="text-xs uppercase tracking-wide text-rose-700 dark:text-rose-400">
-                Monthly Interest
+                Monthly Interest Scenario
               </p>
               <p
                 id="total-monthly-interest"
@@ -441,7 +454,7 @@
             </div>
             <div class="min-w-0">
               <p class="text-xs uppercase tracking-wide text-red-700 dark:text-red-400">
-                Yearly Interest (Est.)
+                Annual Interest Scenario
               </p>
               <p
                 id="total-yearly-interest"
@@ -453,10 +466,17 @@
           </div>
         </section>
 
-        <!-- Overall Utilization -->
+        <p id="scenario-coverage" class="tracker-help"></p>
+        <section id="deadlines" class="tracker-status" aria-labelledby="deadlines-title">
+          <h2 id="deadlines-title" class="text-lg font-semibold">Statement and promotion reminders</h2>
+          <label class="tracker-inline-field">Promotion warning window: <input id="promotion-warning-days" type="number" min="1" max="90" value="7" class="tracker-input tracker-day-input" /> days</label>
+          <p class="tracker-help">Manual references only. A due date is not an interest-start date or proof of a missed payment. Check issuer terms and payment cutoffs.</p>
+          <div id="upcoming-reminders"></div>
+        </section>
+        <!-- Open/unknown-status card utilization -->
         <section class="mb-6">
           <div class="flex items-center justify-between text-sm mb-1">
-            <span class="text-gray-600 dark:text-gray-400">Overall Utilization</span>
+            <span class="text-gray-600 dark:text-gray-400">Open/unknown-status card utilization</span>
             <span id="overall-util-text" class="font-semibold text-gray-800 dark:text-gray-100">0%</span>
           </div>
           <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
@@ -468,134 +488,16 @@
           </div>
         </section>
 
-        <!-- Input Form -->
-        <section
-          class="bg-gray-50 dark:bg-gray-800/60 p-5 rounded-lg mb-8 shadow-sm border border-transparent dark:border-gray-800"
-          aria-labelledby="add-edit"
-        >
-          <h2 id="add-edit" class="text-lg font-semibold mb-4 text-gray-800 dark:text-gray-100">
-            Add Account
-          </h2>
-          <form id="debt-form" class="space-y-4" novalidate>
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div class="md:col-span-2">
-                <label class="block text-sm text-gray-700 dark:text-gray-300 mb-1" for="card-name"
-                  >Account Name</label
-                >
-                <input
-                  id="card-name"
-                  type="text"
-                  placeholder="e.g., Amex Blue Cash"
-                  required
-                  aria-describedby="err-card-name"
-                  class="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                />
-                <p id="err-card-name" class="mt-1 text-xs text-rose-600 dark:text-rose-400 hidden"></p>
-              </div>
-              <div>
-                <label class="block text-sm text-gray-700 dark:text-gray-300 mb-1" for="balance"
-                  >Balance ($)</label
-                >
-                <input
-                  id="balance"
-                  type="number"
-                  inputmode="decimal"
-                  placeholder="1000"
-                  required
-                  step="0.01"
-                  min="0"
-                  aria-describedby="err-balance"
-                  class="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                />
-                <p id="err-balance" class="mt-1 text-xs text-rose-600 dark:text-rose-400 hidden"></p>
-              </div>
-              <div>
-                <label class="block text-sm text-gray-700 dark:text-gray-300 mb-1" for="apr">APR (%)</label>
-                <input
-                  id="apr"
-                  type="number"
-                  inputmode="decimal"
-                  placeholder="24.99"
-                  required
-                  step="0.01"
-                  min="0"
-                  max="99.99"
-                  aria-describedby="err-apr"
-                  class="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                />
-                <p id="err-apr" class="mt-1 text-xs text-rose-600 dark:text-rose-400 hidden"></p>
-              </div>
-              <div>
-                <label class="block text-sm text-gray-700 dark:text-gray-300 mb-1" for="limit"
-                  >Credit Limit ($)</label
-                >
-                <input
-                  id="limit"
-                  type="number"
-                  inputmode="decimal"
-                  placeholder="5000"
-                  required
-                  step="0.01"
-                  min="0"
-                  aria-describedby="err-limit"
-                  class="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                />
-                <p id="err-limit" class="mt-1 text-xs text-rose-600 dark:text-rose-400 hidden"></p>
-              </div>
-            </div>
-            <div class="flex flex-wrap items-center gap-3 justify-between">
-              <button
-                type="submit"
-                id="submit-btn"
-                class="px-5 py-2.5 bg-sky-600 text-white rounded-lg font-semibold hover:bg-sky-700 transition-colors shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                Add Account
-              </button>
-
-              <!-- Accounts controls -->
-              <div class="flex flex-wrap items-center gap-3">
-                <label class="text-sm text-gray-700 dark:text-gray-300" for="sort-by">Sort by</label>
-                <select
-                  id="sort-by"
-                  class="text-sm border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-sky-500"
-                >
-                  <option value="name">Name</option>
-                  <option value="apr">APR</option>
-                  <option value="balance">Balance</option>
-                  <option value="utilization" selected>Utilization</option>
-                  <option value="interestPer100">Interest per $100</option>
-                </select>
-                <button
-                  id="sort-dir"
-                  type="button"
-                  class="text-sm px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
-                  data-dir="desc"
-                >
-                  Desc
-                </button>
-
-                <label class="text-sm text-gray-700 dark:text-gray-300 ml-3" for="util-view"
-                  >Utilization View</label
-                >
-                <select
-                  id="util-view"
-                  class="text-sm border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-sky-500"
-                >
-                  <option value="bar">Bar</option>
-                  <option value="pie">Pie</option>
-                </select>
-              </div>
-            </div>
-          </form>
-        </section>
-
         <!-- Accounts List -->
         <section
           id="accounts"
           class="bg-gray-50 dark:bg-gray-800/60 p-5 rounded-lg mb-8 shadow-sm border border-transparent dark:border-gray-800 scroll-mt-4"
         >
           <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
-            <h2 class="text-lg font-semibold text-gray-800 dark:text-gray-100">My Accounts</h2>
+            <div class="flex flex-wrap items-center gap-3">
+              <h2 class="text-lg font-semibold text-gray-800 dark:text-gray-100">My Accounts</h2>
+              <button id="open-add-account" type="button" class="account-update" onclick="focusAddForm()" aria-haspopup="dialog">+ Add Account</button>
+            </div>
             <div class="flex items-center gap-3">
               <input
                 id="account-search"
@@ -607,6 +509,50 @@
               <p class="text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap" id="accounts-meta"></p>
             </div>
           </div>
+          <fieldset class="account-view-panel">
+            <legend>View & filters</legend>
+              <!-- Accounts controls -->
+              <div class="account-sort">
+                <label class="text-sm text-gray-700 dark:text-gray-300" for="sort-by">Sort by</label>
+                <select
+                  id="sort-by"
+                  class="text-sm border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-sky-500"
+                >
+                  <option value="name">Name</option>
+                  <option value="apr">APR</option>
+                  <option value="balance">Balance</option>
+                  <option value="utilization" selected>Utilization</option>
+                  <option value="interestPer100">Monthly Interest per $100</option>
+                  <option value="monthlyInterest">Monthly Interest</option>
+                </select>
+                <button
+                  id="sort-dir"
+                  type="button"
+                  class="text-sm px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+                  data-dir="desc"
+                >
+                  Desc
+                </button>
+
+                <label class="text-sm text-gray-700 dark:text-gray-300" for="util-view"
+                  >Utilization View</label
+                >
+                <select
+                  id="util-view"
+                  class="text-sm border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-sky-500"
+                >
+                  <option value="bar">Bar</option>
+                  <option value="pie">Pie</option>
+                </select>
+              </div>
+          <div class="account-filters">
+            <label><input id="show-archived" type="checkbox" /> Show archived accounts</label>
+            <label><input id="stale-only" type="checkbox" /> Needs an update</label>
+            <label class="tracker-inline-field">Stale after <input id="stale-days" type="number" min="1" max="365" value="7" class="tracker-input tracker-day-input" /> days</label>
+            <button class="tracker-button" type="button" onclick="exportData('history')">Export history CSV</button>
+          </div>
+          </fieldset>
+          <p class="tracker-help">Archiving hides a card but preserves its balance in totals. Permanent deletion removes its history; the 8-second Undo window closes before cleanup starts. JSON exports include full history and decrypted financial data.</p>
           <div
             id="card-list"
             class="grid grid-cols-1 md:grid-cols-2 gap-4"
@@ -621,14 +567,20 @@
           </button>
         </section>
 
-        <!-- Credit Score Hints -->
+        <!-- Credit Utilization Targets -->
         <section
           id="hints"
           class="bg-gray-50 dark:bg-gray-800/60 p-5 rounded-lg mb-8 shadow-sm border border-transparent dark:border-gray-800 scroll-mt-4"
         >
           <h2 class="text-lg font-semibold mb-4 text-gray-800 dark:text-gray-100">
-            Credit Score Hints
+            Credit Utilization Targets
           </h2>
+          <div class="tracker-actions">
+            <label>Utilization targets (%)<input id="utilization-targets" class="tracker-input" value="80, 50, 30" aria-describedby="targets-help" /></label>
+            <button id="save-utilization-targets" class="tracker-button" type="button">Save targets</button>
+          </div>
+          <p id="targets-help" class="tracker-help">Comma-separated planning targets, not guaranteed credit-score breakpoints. Amounts assume no new charges or limit changes. Closed accounts are excluded from open-credit targets.</p>
+
           <div id="fico-hints" class="space-y-2 text-sm text-gray-700 dark:text-gray-300">
             <p class="text-gray-500 dark:text-gray-400">
               Add accounts to see utilization thresholds and “nudge” amounts.
@@ -682,11 +634,12 @@
               class="bg-gray-50 dark:bg-gray-800/60 p-5 rounded-lg shadow-sm border border-transparent dark:border-gray-800"
             >
               <h3 class="text-base font-semibold mb-3 text-gray-800 dark:text-gray-100">
-                Most Expensive Balances
+                Monthly Interest Cost Scenarios
               </h3>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">Hypothetical monthly cost if each current amount were carried at its entered APR. Actual charges may differ.</p>
               <div id="expensive-list" class="space-y-2">
                 <p class="text-gray-500 dark:text-gray-400">
-                  Add accounts to see per-$100 cost ranking.
+                  Add accounts to see estimated monthly interest by account.
                 </p>
               </div>
             </div>
@@ -746,7 +699,8 @@
                 Run Simulation
               </button>
             </div>
-            <div id="sim-output" class="mt-3 space-y-2 text-sm text-gray-700 dark:text-gray-300">
+            <p class="tracker-help">Illustrative scenario: assumes the entered APR applies, rates and balances follow the model, and no new purchases occur. Meet issuer payment requirements separately; this is not a bank payment schedule.</p>
+          <div id="sim-output" class="mt-3 space-y-2 text-sm text-gray-700 dark:text-gray-300">
               <p class="text-gray-500 dark:text-gray-400">
                 Enter a monthly budget and click “Run Simulation”.
               </p>
@@ -883,7 +837,8 @@
               </p>
             </div>
 
-            <div id="bt-output" class="mt-3 space-y-2 text-sm text-gray-700 dark:text-gray-300">
+            <p class="tracker-help">Hypothetical transfer comparison, not approval or an executed transfer. Confirm the applicable promotional rate, fees, eligibility, and issuer conditions.</p>
+          <div id="bt-output" class="mt-3 space-y-2 text-sm text-gray-700 dark:text-gray-300">
               <p class="text-gray-500 dark:text-gray-400">
                 Enter details and click “Recommend Transfer”.
               </p>
@@ -903,7 +858,49 @@
             <path d="M12 5v14M5 12h14" />
           </svg>
         </button>
+        </div>
+        <section id="progress-view" class="hidden" aria-labelledby="progress-title">
+          <h2 id="progress-title" class="text-xl font-semibold">Balance progress</h2>
+          <p class="tracker-help">Recorded estimated balances over time. These are balance reductions and increases, not a total of payments made. Missing history is never shown as zero.</p>
+          <div class="tracker-fields">
+            <label>Account<select id="progress-account" class="tracker-input"></select></label>
+            <label>Period<select id="progress-period" class="tracker-input"><option value="since">Since comparable tracking began</option><option value="month">This month</option><option value="30">Last 30 days</option><option value="custom">Custom dates</option></select></label>
+            <label>Custom start<input id="progress-from" class="tracker-input" type="date" /></label>
+            <label>Custom end<input id="progress-through" class="tracker-input" type="date" /></label>
+          </div>
+          <button id="progress-refresh" class="tracker-button" type="button">Refresh history</button>
+          <p class="tracker-help">Current tracked balances are compared like-for-like. Different update dates, missing history, and entry-method changes affect coverage. Permanent deletion removes an account's history from future comparisons.</p>
+          <div id="progress-results" aria-live="polite"></div>
+        </section>
       </main>
+
+      <dialog id="add-account-dialog" class="account-add-dialog" aria-labelledby="add-edit" aria-describedby="add-account-description">
+        <h2 id="add-edit" class="text-xl font-semibold mb-2">Add Account</h2>
+          <p class="tracker-help mb-4" id="add-account-description">Enter the current credit limit and available credit shown by your issuer to estimate the balance.</p>
+          <form id="debt-form" novalidate>
+            <div class="add-account-fields">
+            <div class="tracker-fields">
+              <label>Account name<input id="card-name" class="tracker-input" type="text" maxlength="60" placeholder="Account name" required /></label>
+              <label>Credit limit ($)<input id="limit" class="tracker-input" type="number" min="0" step="0.01" inputmode="decimal" required /></label>
+              <label class="entry-available">Available credit ($)<input id="available-credit" class="tracker-input" type="number" min="0" step="0.01" inputmode="decimal" aria-describedby="balance-preview" /></label>
+              <label>Estimated / direct balance ($)<input id="balance" class="tracker-input" type="number" min="0" step="0.01" inputmode="decimal" readonly /></label>
+              <label>Entered APR (%)<input id="apr" class="tracker-input" type="number" min="0" max="99.99" step="0.01" inputmode="decimal" required /></label>
+              <label>Balance entry<select id="entry-method" class="tracker-input"><option value="availableCredit">Calculate from available credit</option><option value="direct">Enter balance directly</option></select></label>
+              <label>Observed on<input id="observation-date" class="tracker-input" type="date" required /></label>
+            </div>
+            <p id="balance-preview" class="tracker-help" aria-live="polite"></p>
+            <p class="tracker-help">Estimated balance may include pending charges or holds and differ from the posted or statement balance.</p>
+            <details class="tracker-details"><summary>Optional reason and note</summary><label>Reason<input id="account-reason" class="tracker-input" maxlength="120" /></label><label>Note<textarea id="account-note" class="tracker-input" maxlength="1000"></textarea></label></details>
+            <p id="add-account-error" class="text-sm text-rose-700 dark:text-rose-300" role="alert"></p>
+            </div>
+            <div class="add-account-footer">
+              <button type="submit" id="submit-btn" class="px-5 py-2.5 bg-sky-600 text-white rounded-lg font-semibold hover:bg-sky-700 focus-visible:ring-2 focus-visible:ring-sky-500 disabled:opacity-60">Add Account</button>
+              <button type="button" id="cancel-add-account" class="tracker-button">Cancel</button>
+
+            </div>
+          </form>
+      </dialog>
+
     </div>
 
     <!-- Footer -->

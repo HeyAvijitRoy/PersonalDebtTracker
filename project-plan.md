@@ -8,6 +8,12 @@ browser.
 This document is the **forward-looking roadmap**. For a dated log of what has
 already shipped, see [`project-status.md`](project-status.md).
 
+The active account-tracking expansion is specified in
+[`implementation-plan.md`](implementation-plan.md), including available-credit
+entry, encrypted history, statement reminders, and the Progress page. That plan
+supersedes the older snapshot and optional minimum-payment proposals below;
+minimum-payment tracking is excluded from the active scope.
+
 **Guiding principles**
 
 - **Privacy first.** No bank linking, no tracking, no ads. Sensitive data is
