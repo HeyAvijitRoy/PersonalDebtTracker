@@ -214,7 +214,7 @@ function toast(message, duration = 1800) {
   announce(message);
   const t = document.createElement("div");
   t.className =
-    "fixed bottom-4 right-4 z-[1100] bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-lg ring-1 ring-white/10 opacity-0 transition-opacity";
+    "pointer-events-none fixed bottom-4 right-4 z-[1100] bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-lg ring-1 ring-white/10 opacity-0 transition-opacity";
   t.textContent = message;
   document.body.appendChild(t);
   requestAnimationFrame(() => {
@@ -1034,6 +1034,7 @@ function renderAll(cards) {
 }
 
 function renderCards(cards) {
+  const openMenus=new Set(Array.from(cardList?.querySelectorAll('.account-menu[open]')??[],menu=>menu.querySelector('[data-id]')?.dataset.id));
   const currentEditor=cardList?.querySelector('.save-inline-btn')?.closest('.debt-card');
   const draft=currentEditor?Array.from(currentEditor.querySelectorAll('[data-field]')).map(input=>({field:input.dataset.field,value:input.value,checked:input.checked})):null;
   const { debt, limit, monthly, util,scenarioCount } = computeTotals(cards);
@@ -1168,7 +1169,7 @@ function renderCards(cards) {
 
           ${
             creditLimit<=0?'':utilView === "pie"
-              ? donut(utilization)
+              ? donut(utilization,creditLimit)
               : `
             <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
               <div class="${utilColor} h-2.5 rounded-full" style="width:${Math.min(
@@ -1251,6 +1252,7 @@ function renderCards(cards) {
       `;
     }
     cardList.appendChild(el);
+    if(openMenus.has(card.id)&&!isEditing)el.querySelector('.account-menu').open=true;
     if(isEditing){
       if(draft)for(const field of draft){const input=el.querySelector(`[data-field="${field.field}"]`);if(input){input.value=field.value;if(input.type==='checkbox')input.checked=field.checked;}}
       refreshEntry(el);
@@ -1269,7 +1271,7 @@ function renderEntryExtras(card){
     <label class="block">Note (optional)<textarea class="tracker-input" data-field="note" maxlength="1000">${escapeHtml(card.note??'')}</textarea></label>`;
 }
 
-function donut(util) {
+function donut(util,limit) {
   const r = 18,
     c = 2 * Math.PI * r;
   const pct = Math.max(0, Math.min(100, util));

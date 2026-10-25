@@ -8,6 +8,13 @@ try{
  await page.locator('#lock-pass1').fill(password);await page.locator('#lock-pass2').fill(password);await page.locator('#lock-setup-btn').click();await page.locator('#main-app:not(.hidden)').waitFor();
  async function add(name,limit,available,apr){await page.locator('#open-add-account').click();await page.locator('#card-name').fill(name);await page.locator('#limit').fill(String(limit));await page.locator('#available-credit').fill(String(available));await page.locator('#apr').fill(String(apr));await page.locator('#submit-btn').click();await page.locator('#add-account-dialog').waitFor({state:'hidden'});await page.waitForFunction(()=>document.querySelector('#sync-status').textContent.includes('No local drafts'));}
  await add(large,5000,3000,30);await add('Small',1000,500,5);
+ await page.locator('#util-view').selectOption('pie');await page.locator('.debt-card svg').first().waitFor();
+ await page.locator('#util-view').selectOption('bar');
+ await page.locator('.account-menu summary').first().click();
+ await page.evaluate(()=>{globalThis.__oldMenu=document.querySelector('.account-menu');__syntheticEmit();});
+ await page.waitForFunction(()=>!__oldMenu.isConnected);
+ assert.equal(await page.locator('.account-menu').first().getAttribute('open'),'','Account actions must stay open across background refreshes');
+ await page.locator('.account-menu summary').first().click();
  assert.equal(await page.locator('nav[aria-label="Primary"] a').count(),3);
  await page.locator('#utilization-targets').fill('80, 50, 30, 10');await page.locator('#save-utilization-targets').click();
  assert.equal(await page.locator('#utilization-kpis > article').count(),4);assert.match(await page.locator('.utilization-target-kpi[data-target="10"]').innerText(),/\$1,900\.00/);

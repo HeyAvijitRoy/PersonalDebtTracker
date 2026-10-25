@@ -16,6 +16,10 @@
   safe text rendering, no financial writes, navigation, private-state clearing,
   target persistence, and dark/mobile layouts. Passed 68 unit tests and four
   synthetic browser suites. No production debug output added. Cache v17.
+- Release checks also caught an action-menu refresh race: open menus now survive
+  background card rendering and informational toasts do not intercept clicks.
+  Fixed the existing pie utilization label's missing limit argument and added
+  browser regression coverage for pie rendering and menu preservation.
 
 ## 2026-10-25 - Passphrase form metadata and Rocket Loader exclusion
 
