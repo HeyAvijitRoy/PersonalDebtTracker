@@ -78,7 +78,7 @@ Node 22. Patched transitive development dependencies are pinned through npm
 overrides and exercised by the build/emulator/browser checks. No npm packages
 are included in the deployed static artifact.
 
-Verified locally: 55 unit/crypto/model/session/server tests; ten emulator rule
+Verified locally: 58 unit/crypto/model/session/server tests; eleven emulator rule
 tests; three synthetic browser suites; dependency audit with zero reported
 vulnerabilities. Checks include owner/anonymous/foreign-user
 rules; paired/stale writes; immutable/restored history; multi-batch purge; calculated
@@ -100,7 +100,7 @@ credential folders, test fixtures, or backups as a general directory server woul
    block old-client writes while preserving legacy reads; keep this maintenance
    gap short. Test owner and foreign-user access against the actual deployed rules.
 3. Publish this branch's tested application assets through the normal Pages
-   workflow. Service-worker cache v12 replaces older asset caches.
+   workflow. Service-worker cache v13 replaces older asset caches.
 4. Verify real sign-in/unlock, one account update with its encrypted event,
    offline/reconnect, backup/restore, Progress, and sign-out on the live deployment.
 5. Keep a schema-compatible client for rollback. Do not restore the old four-field
@@ -138,9 +138,9 @@ Session guards reject late reads after sign-out. History pagination filters the
 existing version-2 envelope field before descending document order, avoiding the
 bare descending-key query failure reproduced with the emulator.
 
-Writes still use revision-checked SDK transactions. A bounded sync wait retains
+Writes use revision-checked authenticated HTTPS transactions. Unconfirmed saves retain
 encrypted drafts for retry rather than claiming a save succeeded. No rules were
-weakened or deployed. Local validation: 55 unit checks, 10 emulator rule checks
+weakened or deployed. Local validation: 58 unit checks, 11 emulator rule checks
 (including real REST listing, history cursors and foreign-owner rejection), and
 all three browser suites. Startup coverage includes a stalled account listener,
 authenticated HTTPS account loading, and encrypted offline account recovery.
@@ -180,3 +180,24 @@ focus and returns it on close. No draft is newly persisted. Browser checks cover
 these flows, private-state clearing, sticky scroll positioning, continued history/
 backup/Undo behavior, and dark mobile layout. Financial logic and access rules
 are unchanged.
+
+
+## HTTPS transaction sync recovery (2026-10-25)
+
+The initial HTTPS fallback covered reads while saves still used the stalled SDK
+transport. Account/history saves now use authenticated HTTPS read-write
+transactions with the same revision checks, atomic paired-event rules and
+idempotent encrypted operation IDs. Transactions retry bounded ABORTED contention;
+network errors, denied writes, session changes and uncertain commit responses retain
+the original encrypted draft. Previously committed immutable events are read and
+verified before a replay clears its local draft. No simultaneous SDK/REST write
+race is introduced. Purge batches use authenticated HTTPS and existing freeze rules.
+
+Server-confirmed views update in memory before pending rows are removed, including
+linked transfers. Offline snapshots contain only encrypted envelopes and rejected
+record counts. A commit invalidates older in-flight list refreshes. The connection
+notice distinguishes unavailable live updates from independently confirmed saves.
+Rules failures point to deploying the existing firestore.rules; rules were not
+weakened or deployed by this fix. REST emulator tests and browser transport stubs
+verify these cases, including a confirmed changed balance surviving offline reload.
+Real-user sync remains to be verified in the user's authenticated browser.

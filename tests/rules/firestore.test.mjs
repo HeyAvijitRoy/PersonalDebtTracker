@@ -4,6 +4,11 @@ import { initializeTestEnvironment,assertSucceeds,assertFails } from "@firebase/
 import { doc,setDoc,getDoc,getDocs,collection,deleteDoc,writeBatch } from "firebase/firestore";
 import { createMockUserToken } from '@firebase/util';
 import { FirestoreReadClient } from '../../src/firestore-read.mjs';
+import { FirestoreWriteClient } from '../../src/firestore-write.mjs';
+import { TrackingStore } from '../../src/tracking-store.mjs';
+import { memoryOutbox } from '../../src/outbox.mjs';
+import { createAccount } from '../../src/account-model.mjs';
+import assert from 'node:assert/strict';
 let env;
 const path="artifacts/demo-pdt/users/owner/cards/card";
 const card=(revision,purging=false)=>({v:2,iv:"AAAAAAAAAAAAAAAA",data:"A".repeat(24),revision,purging});
@@ -12,6 +17,24 @@ before(async()=>{env=await initializeTestEnvironment({projectId:"demo-pdt",fires
 after(async()=>{await env?.cleanup();});
 beforeEach(async()=>{await env.clearFirestore();});
 function paired(db,revision,previous="absent",purging=false){const batch=writeBatch(db);batch.set(doc(db,path),card(revision,purging));batch.set(doc(db,`${path}/events/${revision}`),event(revision,previous));return batch.commit();}
+test('HTTPS transactions replay encrypted drafts atomically, retain rejected drafts, and preserve idempotence',async()=>{
+ const reader=uid=>new FirestoreReadClient({projectId:'demo-pdt',uid:'owner',getUser:()=>({uid:'owner',getIdToken:async()=>createMockUserToken({sub:uid},'demo-pdt')}),fetcher:(url,options)=>fetch(url.replace('https://firestore.googleapis.com','http://127.0.0.1:8085'),options)});
+ const client=reader('owner'),writer=new FirestoreWriteClient(client),key=await crypto.subtle.generateKey({name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+ const outbox=memoryOutbox(),confirmed=[];
+ const store=new TrackingStore({namespace:client.namespace,key,outbox,adapter:writer,onCommitted:views=>confirmed.push(...views)});
+ const account=createAccount({name:'Synthetic HTTPS account',creditLimit:1000,availableCredit:200,apr:12});
+ const view=await store.enqueue(null,account,'add'),[draft]=await outbox.list(client.namespace);
+ await store.flush();assert.equal((await store.pending()).length,0);assert.equal(confirmed[0].balance,800);
+ assert.equal((await client.accounts()).length,1);assert.equal((await client.history(view.id)).rows.length,1);
+ await outbox.put(draft);await store.flush();assert.equal((await store.pending()).length,0);assert.equal((await client.history(view.id)).rows.length,1);
+ store.adapter=new FirestoreWriteClient(reader('other'));await store.enqueue(view,{...account,note:'Permission failure'},'edit');await store.flush();
+ assert.equal((await store.pending())[0].error,'rules');assert.equal((await client.history(view.id)).rows.length,1);
+ store.adapter=writer;await store.flush();assert.equal((await store.pending()).length,0);
+ const db=env.authenticatedContext('owner').firestore();
+ const current=(await client.accounts())[0];
+ await assertFails(writer.transact(async tx=>{await tx.get(`${client.namespace}/cards/${view.id}`);tx.set(`${client.namespace}/cards/${view.id}`,{...current.data,revision:'unpaired'});}));
+ assert.equal((await getDoc(doc(db,`${client.namespace}/cards/${view.id}`))).data().revision,current.data.revision);
+});
 test('HTTPS account listing and history cursors obey owner rules',async()=>{
  const db=env.authenticatedContext('owner').firestore();await paired(db,'first');await paired(db,'second','first');
  const reader=uid=>new FirestoreReadClient({projectId:'demo-pdt',uid:'owner',getUser:()=>({uid:'owner',getIdToken:async()=>createMockUserToken({sub:uid},'demo-pdt')}),fetcher:(url,options)=>fetch(url.replace('https://firestore.googleapis.com','http://127.0.0.1:8085'),options)});

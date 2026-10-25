@@ -1,6 +1,6 @@
 // Bump this on every deploy that changes cached assets; the activate
 // handler purges any cache that doesn't match, so old shells can't linger.
-const CACHE_NAME = "debt-tracker-v12";
+const CACHE_NAME = "debt-tracker-v13";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -15,6 +15,7 @@ const APP_SHELL = [
   "./src/event-model.mjs",
   "./src/firestore-adapter.mjs",
   "./src/firestore-read.mjs",
+  "./src/firestore-write.mjs",
   "./src/encrypted-read-cache.mjs",
   "./src/history.mjs",
   "./src/lock-gate.mjs",

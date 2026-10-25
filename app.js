@@ -17,7 +17,7 @@ import { fallbackAfter,fetchCryptoMetadata,metadataCache } from "./src/metadata-
 import { FirestoreReadClient } from "./src/firestore-read.mjs";
 import { encryptedReadCache } from "./src/encrypted-read-cache.mjs";
 const readCache=encryptedReadCache();
-let accountReader=null,refreshAccounts=null,stopAccountReads=null;
+let accountReader=null,refreshAccounts=null,stopAccountReads=null,accountCommitVersion=0;
 const sessionScope = new SessionScope();
 let tracking=null,cloudCards=[],pendingRows=[],viewSequence=0;
 let cleanupRunning=false;
@@ -428,7 +428,15 @@ function enterAppAfterUnlock() {
   tracking=new TrackingStore({namespace:`artifacts/${appId}/users/${uid}`,key,
     adapter:firestoreAdapter(db,accountReader),outbox:indexedOutbox(),
     isActive:()=>sessionScope.current(generation)&&userId===uid&&cryptoKey===key,
-    onChange:()=>{refreshTrackingView().catch(()=>{});},
+    onCommitted:views=>{
+      if(!sessionScope.current(generation)||userId!==uid||cryptoKey!==key)return;
+      accountCommitVersion++;
+      const confirmed=new Map(cloudCards.map(card=>[card.id,card]));
+      for(const view of views)confirmed.set(view.id,view);
+      cloudCards=[...confirmed.values()];
+      if(firstSnapshotReceived&&cloudCards.every(card=>card._encrypted))readCache.write(`artifacts/${appId}/users/${uid}`,cloudCards.map(card=>({id:card.id,data:card._encrypted})),unreadableRecords).catch(()=>{});
+    },
+    onChange:()=>{refreshTrackingView().catch(()=>{});if(tracking?.flushing)refreshAccounts?.();},
   });
   lockSection?.classList.add("hidden");
   lockSetup?.classList.add("hidden");
@@ -468,6 +476,10 @@ async function cleanupDeletedAccounts(){
       if(remaining>0){setTimeout(()=>cleanupDeletedAccounts().catch(()=>{}),remaining+50);continue;}
       if(!card._purging){await store.enqueue(card,fieldsOf(card),'purge');await store.flush();setTimeout(()=>cleanupDeletedAccounts().catch(()=>{}),100);return;}
       await store.adapter.purge(cardPath(store.namespace,card.id),()=>!store.closed&&store.isActive());
+      store.active();if(store!==tracking)return;
+      accountCommitVersion++;cloudCards=cloudCards.filter(row=>row.id!==card.id);
+      if(cloudCards.every(row=>row._encrypted))readCache.write(store.namespace,cloudCards.map(row=>({id:row.id,data:row._encrypted})),unreadableRecords).catch(()=>{});
+      await refreshTrackingView();
     }
   }finally{cleanupRunning=false;}
 }
@@ -481,7 +493,7 @@ function renderSyncStatus() {
     const op=row.operation,line=document.createElement("div");line.className="tracker-sync-row";
     const text=document.createElement("span");
     const current=cloudCards.find(c=>c.id===op.accountId);
-    text.textContent=row.error==="rules"?`${op.after.name}: server permissions/rules need attention; draft retained.`:row.status==="conflict"?`${op.after.name}: draft balance ${fmtMoney(op.after.balance)}; latest balance ${current?fmtMoney(current.balance):"account removed"}.`:op.after.name+": pending connection.";
+    text.textContent=row.error==="rules"?`${op.after.name}: Firestore rejected this request. Deploy the current firestore.rules to the correct project, then retry; draft retained.`:row.status==="conflict"?`${op.after.name}: draft balance ${fmtMoney(op.after.balance)}; latest balance ${current?fmtMoney(current.balance):"account removed"}.`:op.after.name+": pending connection.";
     line.append(text);
     if(row.status==='conflict'){
       const details=document.createElement('details');details.className='tracker-details';const title=document.createElement('summary');title.textContent='Review all draft and latest fields';const values=document.createElement('pre');values.style.whiteSpace='pre-wrap';values.textContent=JSON.stringify({draft:op.after,linkedDraft:op.details?.other??null,latest:current?fieldsOf(current):null,linkedLatest:op.details?.other?cloudCards.find(card=>card.id===op.details.other.id)??null:null},null,2);details.append(title,values);line.append(details);
@@ -686,7 +698,7 @@ function setupFirestoreListener(uid) {
       try {
         const fields=await decryptAccount(row.data,listenerKey,`${namespace}/cards/${row.id}`);
         if(!active()||!sessionScope.accepts(ticket))return;
-        decrypted.push({...fields,id:safeId(row.id),_revision:revisionOf(row.data),_purging:row.data.purging??false});valid.push(row);
+        decrypted.push({...fields,id:safeId(row.id),_revision:revisionOf(row.data),_purging:row.data.purging??false,_encrypted:row.data});valid.push(row);
       }catch{rejected++;}
     }
     if(!active()||!sessionScope.accepts(ticket))return;
@@ -700,9 +712,9 @@ function setupFirestoreListener(uid) {
     if(!active()||stopped||busy)return;
     busy=true;notice('Refreshing encrypted account data...');
     try {
-      const rows=await reader.accounts();
-      if(!active()||live||stopped)return;
-      remoteLoaded=true;await apply(rows);notice('Accounts loaded through HTTPS. Live sync is unavailable; refresh to check for updates. Changes remain pending until sync confirms them.');
+      const version=accountCommitVersion,rows=await reader.accounts();
+      if(!active()||live||stopped||version!==accountCommitVersion)return;
+      remoteLoaded=true;await apply(rows);notice('Live updates are unavailable. Accounts refresh over HTTPS; each save is confirmed separately.');
     }catch(error){
       if(!active()||live||stopped)return;
       if(!firstSnapshotReceived){

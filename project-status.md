@@ -1,3 +1,17 @@
+## 2026-10-25 - Recover pending saves without the live SDK stream
+
+- Added owner-authenticated HTTPS transactions for account/history writes, with
+  atomic commits, bounded contention retry, replay detection and session guards.
+  Existing encrypted outbox drafts are replayed without migration or discarding.
+- Confirmed server views update immediately and retain only encrypted envelopes
+  in the offline snapshot. In-flight older refreshes cannot replace a new commit.
+- HTTPS cleanup preserves terminal-purge rules. Permission failures retain the
+  draft and identify the rules deployment step instead of implying successful sync.
+- Verified 58 unit checks, 11 emulator rule checks, and three browser suites,
+  including real REST transactions, idempotent replay, denied/unpaired writes,
+  no-listener saves, permission retry, offline confirmed balances, and prior flows.
+  No production rules or user financial records were accessed or changed. Cache v13.
+
 ## 2026-10-25 - Sticky navigation and modal account entry
 
 - Made the header sticky with an opaque theme-aware background and measured

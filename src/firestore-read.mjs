@@ -13,15 +13,17 @@ export class FirestoreReadClient {
   this.resource=`projects/${encodeURIComponent(projectId)}/databases/(default)/documents/artifacts/${encodeURIComponent(projectId)}/users/${encodeURIComponent(uid)}`;
  }
  active(){if(!this.isActive())throw new Error('Session changed. Unlock again.');}
- async request(suffix,{method='GET',body}={}){
+ async request(suffix,{method='GET',body,databaseOperation=false}={}){
+  if(databaseOperation&&![':beginTransaction',':batchGet',':commit',':rollback'].includes(suffix))throw new Error('Unsupported database operation.');
   this.active();const user=this.getUser();if(!user||user.uid!==this.uid)throw new Error('Sign out and sign in again to load your accounts.');
   const token=await deadline(user.getIdToken(),8000,'Sign-in refresh timed out. Sign out and sign in again.');this.active();
   if(!token)throw new Error('Your sign-in session is unavailable. Sign out and sign in again.');
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),this.timeoutMs);
   try{
-   const response=await this.fetcher(`https://firestore.googleapis.com/v1/${this.resource}${suffix}`,{method,headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,credentials:'omit',cache:'no-store',signal:controller.signal});
+   const resource=databaseOperation?this.resource.split('/documents/')[0]+'/documents':this.resource;
+   const response=await this.fetcher(`https://firestore.googleapis.com/v1/${resource}${suffix}`,{method,headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,credentials:'omit',cache:'no-store',signal:controller.signal});
    const result=await response.json();this.active();
-   if(!response.ok){const error=new Error(response.status===403?'Firestore denied access. Check the deployed owner-access rules.':response.status===401?'Your sign-in session expired. Sign out and sign in again.':'Firestore could not load account data. Check the connection and retry.');error.code=result.error?.status?.toLowerCase().replaceAll('_','-');throw error;}
+   if(!response.ok){const error=new Error(response.status===403?'Firestore denied access. Deploy the current firestore.rules to the correct Firebase project, then retry. Your draft is retained.':response.status===401?'Your sign-in session expired. Sign out and sign in again.':'Firestore could not complete the request. Check the connection and retry.');error.code=result.error?.status?.toLowerCase().replaceAll('_','-');throw error;}
    return result;
   }catch(error){if(error.name==='AbortError')throw new Error('Account data did not respond. Retry or check access to firestore.googleapis.com.');if(error instanceof TypeError)throw new Error('Your browser could not reach Firestore. Check network/filter settings and retry.');throw error;}
   finally{clearTimeout(timer);}
