@@ -79,11 +79,22 @@ export class TrackingStore {
             if(revisionOf(raw)!==op.base) {const error=new Error("A newer version exists. Review your saved draft before applying it.");error.code="conflict";throw error;}
             const before=raw?await decryptAccount(raw,key,path):null;
             const event={schemaVersion:1,id:op.id,accountId:op.accountId,type:op.type,details:op.details,recordedAt:op.recordedAt,before,after:op.after};
+            let linked=null;
+            if(op.type==="transfer"&&op.details.other){
+              const other=op.details.other;if(other.id===op.accountId)throw new Error("Choose two different accounts.");
+              const otherPath=cardPath(this.namespace,other.id),otherRaw=await tx.get(otherPath);
+              if(!otherRaw||otherRaw.purging||revisionOf(otherRaw)!==other.base){const error=new Error("Transfer account changed. Review the draft.");error.code="conflict";throw error;}
+              const otherBefore=await decryptAccount(otherRaw,key,otherPath);
+              const otherAfter=readAccount(other.after),otherEventPath=`${otherPath}/events/${op.id}`;
+              const otherEvent={...event,accountId:other.id,before:otherBefore,after:otherAfter,details:{pairId:op.id,amountCents:op.details.amountCents,feeCents:op.details.feeCents,direction:"in",otherId:op.accountId,applied:op.details.applied}};
+              linked={path:otherPath,snapshot:await encryptTrackingAccount(otherAfter,key,otherPath,op.id),eventPath:otherEventPath,event:{...await sealJSON(otherEvent,key,otherEventPath,32768),v:2,revision:op.id,previous:otherRaw.v===1?"legacy":otherRaw.revision}};
+            }
             const [snapshot,sealed]=await Promise.all([encryptTrackingAccount(op.after,key,path,op.id),sealJSON(event,key,eventPath,32768)]);
             snapshot.purging=op.type==="purge";
             this.active();
             tx.set(path,snapshot);
             tx.set(eventPath,{...sealed,v:2,revision:op.id,previous:op.base.startsWith("legacy:")?"legacy":op.base});
+            if(linked){tx.set(linked.path,linked.snapshot);tx.set(linked.eventPath,linked.event);}
           });
           await this.outbox.remove(row.key);
         } catch(error) {
@@ -98,7 +109,9 @@ export class TrackingStore {
   }
   async discard(accountId) {
     this.active();
-    for(const row of await this.pending())if(row.operation.accountId===accountId)await this.outbox.remove(row.key);
+    const rows=await this.pending(),affected=new Set([accountId]);
+    for(let changed=true;changed;){changed=false;for(const row of rows){const op=row.operation;if(affected.has(op.accountId)||op.details?.other&&affected.has(op.details.other.id)){for(const id of [op.accountId,op.details?.other?.id].filter(Boolean))if(!affected.has(id)){affected.add(id);changed=true;}}}}
+    for(const row of rows)if(affected.has(row.operation.accountId))await this.outbox.remove(row.key);
     this.active();this.onChange();
   }
 }

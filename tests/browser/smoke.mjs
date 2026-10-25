@@ -38,6 +38,17 @@ try {
  assert.equal(await page.locator('#total-debt').textContent(),'$1,500.00');
  await page.locator('#show-archived').check();await page.getByRole('button',{name:'Unarchive',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('#sync-status')?.textContent.includes('No local drafts'));
+ await page.getByRole('button',{name:'Statement & planning',exact:true}).click();
+ await page.getByLabel('Statement closing date',{exact:true}).fill('2026-10-01');await page.getByLabel('Payment due date',{exact:true}).fill('2026-11-10');await page.getByLabel('Statement balance ($)',{exact:true}).fill('1500');
+ await page.getByLabel('Include this balance in hypothetical interest-cost comparisons',{exact:true}).check();
+ await page.getByRole('button',{name:'Save statement and promotion references',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('#sync-status')?.textContent.includes('No local drafts'));
+ await page.getByRole('button',{name:'Record payment',exact:true}).click();await page.getByLabel('Payment amount ($)',{exact:true}).fill('100');await page.getByRole('button',{name:'Save payment record',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('#sync-status')?.textContent.includes('No local drafts'));
+ assert.equal(await page.locator('#total-debt').textContent(),'$1,500.00');
+ await page.getByRole('button',{name:'Statement & planning',exact:true}).click();
+ await page.getByText('Statement balance minus linked posted payment records: $1,400.00.',{exact:false}).waitFor();
+ await page.locator('dialog').getByRole('button',{name:'Close',exact:true}).click();
  const downloaded=page.waitForEvent('download');await page.locator('button[onclick="exportData(\'json\')"]').first().click();
  const backup=JSON.parse(await readFile(await (await downloaded).path(),'utf8'));assert.equal(backup.accounts.length,1);assert.ok(backup.accounts[0].events.length>=4);
  await mkdir("test-results",{recursive:true});await page.screenshot({path:"test-results/accounts-desktop.png",fullPage:true});

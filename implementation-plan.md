@@ -15,7 +15,11 @@ encrypted mutations for add/edit/import/quick adjustments. Synthetic desktop/mob
 browser checks pass. Stage 4 adds paginated history/corrections, freshness filters,
 archive/issuer-status controls, frozen batched deletion/Undo, full JSON history
 backup/restore with stable identities, and formula-safe CSV exports. Six emulator
-rule tests cover live and restored history. Stages 5-7 remain pending. No live cloud rules or
+rule tests cover live and restored history. Stage 5 adds manual statement/promotion
+references, conditional interest guidance, optional statement-linked payment
+records/status updates, atomic two-account transfer records, provisional adjustment
+labels, and explicit interest-scenario opt-in/coverage. No minimum-payment fields
+or exact interest-start inference are included. Stages 6-7 remain pending. No live cloud rules or
 deployment have been changed.
 
 ## Goal and scope

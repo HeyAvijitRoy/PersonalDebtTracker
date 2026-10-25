@@ -17,6 +17,8 @@ const APP_SHELL = [
   "./src/money.mjs",
   "./src/observations.mjs",
   "./src/outbox.mjs",
+  "./src/planning-ui.mjs",
+  "./src/planning.mjs",
   "./src/session-scope.mjs",
   "./src/tracking-store.mjs",
 ];

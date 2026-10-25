@@ -55,3 +55,10 @@ test("backup history is owner-only and immutable until purge",async()=>{
  await assertFails(getDoc(doc(env.authenticatedContext('other').firestore(),`${path}/restored/imported`)));
  await assertFails(deleteDoc(restored));await paired(db,'purge','first',true);await assertSucceeds(deleteDoc(restored));
 });
+test("two linked account updates and their events can commit in one atomic transfer",async()=>{
+ const db=env.authenticatedContext('owner').firestore();await paired(db,'first');
+ const target=path.slice(0,-4)+'target';
+ const create=writeBatch(db);create.set(doc(db,target),card('target-first'));create.set(doc(db,`${target}/events/target-first`),event('target-first','absent'));await assertSucceeds(create.commit());
+ const transfer=writeBatch(db);for(const [p,previous] of [[path,'first'],[target,'target-first']]){transfer.set(doc(db,p),card('transfer'));transfer.set(doc(db,`${p}/events/transfer`),event('transfer',previous));}
+ await assertSucceeds(transfer.commit());
+});

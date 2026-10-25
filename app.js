@@ -8,6 +8,8 @@ import { makeObservation,localDate } from "./src/observations.mjs";
 import { estimateBalance,paymentToTarget } from "./src/money.mjs";
 import { showHistory,makeBackup,restoreBackup,historyCSV,trackingDialog,element as uiElement,button as uiButton } from "./src/account-tools.mjs";
 import { BACKUP_FORMAT,validateBackup,csvCell } from "./src/backup.mjs";
+import { showPlanning,showPayment,showTransfer } from "./src/planning-ui.mjs";
+import { scenarioCost,reminders } from "./src/planning.mjs";
 const sessionScope = new SessionScope();
 let tracking=null,cloudCards=[],pendingRows=[],viewSequence=0;
 let cleanupRunning=false;
@@ -378,6 +380,7 @@ async function refreshTrackingView() {
   for(const row of rows) {
     const op=row.operation;if(blocked.has(op.accountId)||op.type==='restore-history')continue;
     view.set(op.accountId,{...op.after,id:op.accountId,_revision:op.id,_pending:true});
+    if(op.type==='transfer'&&op.details.other){const other=op.details.other;view.set(other.id,{...other.after,id:other.id,_revision:op.id,_pending:true});}
   }
   window.__latestCards=[...view.values()].filter(card=>!card.deletedAt);
   renderAll(window.__latestCards);
@@ -409,7 +412,7 @@ function renderSyncStatus() {
     const current=cloudCards.find(c=>c.id===op.accountId);
     text.textContent=row.error==="rules"?`${op.after.name}: server permissions/rules need attention; draft retained.`:row.status==="conflict"?`${op.after.name}: draft balance ${fmtMoney(op.after.balance)}; latest balance ${current?fmtMoney(current.balance):"account removed"}.`:op.after.name+": pending connection.";
     line.append(text);
-    if(row.status==="conflict"){
+    if(row.status==="conflict"&&op.type!=="transfer"){
       const apply=document.createElement("button");apply.className="tracker-button";apply.textContent="Apply my draft to latest";
       apply.onclick=async()=>{const store=tracking;if(!current||!store)return;try{await store.discard(op.accountId);await store.enqueue(current,op.after,"conflict-resolution",op.details);store.flush().catch(()=>{});}catch{showModal("Not saved","Could not apply the draft. Please try again.");}};line.append(apply);
     }
@@ -503,7 +506,7 @@ function clearUnlockedState() {
   window.__latestCards = [];
   firstSnapshotReceived = false;
   editingId = null;
-  for (const id of ["card-list", "avalanche-list", "snowball-list", "expensive-list", "fico-hints", "bt-output", "sim-output"]) {
+  for (const id of ["card-list", "avalanche-list", "snowball-list", "expensive-list", "fico-hints", "bt-output", "sim-output","upcoming-reminders"]) {
     document.getElementById(id)?.replaceChildren();
   }
   for (const element of [totalDebtDisplay, totalCreditLineDisplay, totalMonthlyInterestDisplay, totalYearlyInterestDisplay]) {
@@ -679,11 +682,11 @@ function computeTotals(cards) {
       a = +c.apr || 0;
     debt += b;
     if(c.status!=="closed")limit += l;
-    monthly += monthlyInterest(b, a);
+    monthly += scenarioCost(c)??0;
   }
   const openDebt=cards.filter(c=>c.status!=="closed").reduce((sum,c)=>sum+(+c.balance||0),0);
   const util = limit > 0 ? (openDebt / limit) * 100 : 0;
-  return { debt, limit, monthly, util };
+  return { debt, limit, monthly, util,scenarioCount:cards.filter(c=>scenarioCost(c)!==null).length };
 }
 function computeCardUtilization(card) {
   const b = +card.balance || 0,
@@ -875,6 +878,7 @@ function planBalanceTransfer(
 
 // Payoff schedule simulator
 function simulatePayoff(cards, monthlyBudget, strategy) {
+  if(cards.some(card=>hasBalance(card)&&card.rateBasis&&card.rateBasis!=='single'))return {error:'Mixed or unknown APR categories need a single-rate scenario assumption before simulation.'};
   const MAX_MONTHS = 600; // 50-year safety cap
   let working = cards
     .map((c) => ({ name: c.name, balance: +c.balance || 0, apr: +c.apr || 0 }))
@@ -1054,19 +1058,21 @@ function renderAll(cards) {
   renderStrategy(cards, "snowball");
   renderExpensive(cards);
   renderFicoHints(cards);
+  renderReminders(cards);
 }
 
 function renderCards(cards) {
   const currentEditor=cardList?.querySelector('.save-inline-btn')?.closest('.debt-card');
   const draft=currentEditor?Array.from(currentEditor.querySelectorAll('[data-field]')).map(input=>({field:input.dataset.field,value:input.value,checked:input.checked})):null;
-  const { debt, limit, monthly, util } = computeTotals(cards);
+  const { debt, limit, monthly, util,scenarioCount } = computeTotals(cards);
   if (totalDebtDisplay) totalDebtDisplay.textContent = fmtMoney(debt);
   if (totalCreditLineDisplay)
     totalCreditLineDisplay.textContent = fmtMoney(limit);
   if (totalMonthlyInterestDisplay)
-    totalMonthlyInterestDisplay.textContent = fmtMoney(monthly);
+    totalMonthlyInterestDisplay.textContent = scenarioCount||!cards.length?fmtMoney(monthly):'Not included';
   if (totalYearlyInterestDisplay)
-    totalYearlyInterestDisplay.textContent = fmtMoney(monthly * 12);
+    totalYearlyInterestDisplay.textContent = scenarioCount||!cards.length?fmtMoney(monthly * 12):'Not included';
+  const coverage=document.getElementById('scenario-coverage');if(coverage)coverage.textContent=`Interest scenarios include ${scenarioCount} of ${cards.length} accounts. Opt in per account under Statement & planning. Constant balances/rates, before fees and compounding; not actual charges.`;
   if (overallUtilBar) {
     const pct = Math.max(0, Math.min(100, util));
     overallUtilBar.style.width = `${pct}%`;
@@ -1112,7 +1118,7 @@ function renderCards(cards) {
     const balance = +card.balance || 0;
     const apr = +card.apr || 0;
     const creditLimit = +card.creditLimit || 0;
-    const monthlyInt = monthlyInterest(balance, apr);
+    const monthlyInt = scenarioCost(card);
     const utilization = computeCardUtilization(card);
     const utilColor =
       utilization <= 30
@@ -1151,14 +1157,15 @@ function renderCards(cards) {
               <p>Limit: <span class="font-semibold text-gray-900 dark:text-gray-100">${fmtMoney(
                 creditLimit
               )}</span></p>
-              <p>Monthly cost scenario: <span class="font-semibold text-gray-900 dark:text-gray-100">${fmtMoney(
-                monthlyInt
-              )}</span></p>
+              <p>Monthly cost scenario: <span class="font-semibold text-gray-900 dark:text-gray-100">${monthlyInt===null?'Not included':fmtMoney(monthlyInt)}</span></p>
             </div>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Est. monthly interest per $100: ${fmtMoney(interestPer100(apr))}</p>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Hypothetical monthly cost per $100 at entered APR: ${card.rateBasis&&card.rateBasis!=='single'?'Unavailable':fmtMoney(interestPer100(apr))}</p>
             <p class="tracker-help">${card.entryMethod==='availableCredit'?'Estimated from available credit: '+fmtMoney(card.availableCredit):'Direct balance entry'} ? ${card.effectiveDate?'Observed '+escapeHtml(card.effectiveDate):'Observation date not recorded'}${card._pending?' ? Pending sync':''}</p>
             <p class="tracker-help">${card.archived?'Archived (still included in totals). ':''}${card.status==='closed'?'Issuer-closed; outstanding balance remains tracked. ':''}${!card.effectiveDate||(Date.now()-Date.parse(card.effectiveDate+'T00:00:00'))/86400000>=Number(document.getElementById('stale-days')?.value||7)?'Balance needs an update.':''}</p>
             <div class="tracker-actions">
+              <button class="tracker-button" data-account-action="planning" data-id="${card.id}">Statement & planning</button>
+              <button class="tracker-button" data-account-action="payment" data-id="${card.id}">Record payment</button>
+              <button class="tracker-button" data-account-action="transfer" data-id="${card.id}">Record transfer</button>
               <button class="tracker-button" data-account-action="history" data-id="${card.id}">View history</button>
               <button class="tracker-button" data-account-action="archive" data-id="${card.id}">${card.archived?'Unarchive':'Archive'}</button>
               <button class="tracker-button" data-account-action="status" data-id="${card.id}">${card.status==='closed'?'Mark issuer-open':'Mark issuer-closed'}</button>
@@ -1355,13 +1362,14 @@ function renderExpensive(cards) {
     .filter(hasBalance)
     .map((card) => ({
       ...card,
-      monthlyCost: monthlyInterest(+card.balance || 0, +card.apr || 0),
+      monthlyCost: scenarioCost(card),
     }))
+    .filter(card=>card.monthlyCost!==null)
     .sort((a, b) => b.monthlyCost - a.monthlyCost);
   expensiveList.innerHTML = "";
   if (!ranked.length && cards.length) {
     expensiveList.innerHTML =
-      '<p class="text-emerald-700 dark:text-emerald-400">No balances left to rank.</p>';
+      '<p class="text-gray-500 dark:text-gray-400">No eligible balances included. Opt into a single-rate scenario under Statement & planning.</p>';
     return;
   }
   if (!ranked.length) {
@@ -1808,6 +1816,10 @@ cardList?.addEventListener('click',async e=>{
  const button=e.target.closest('[data-account-action]');if(!button)return;
  const card=window.__latestCards.find(c=>c.id===button.dataset.id);if(!card||!tracking)return;
  try{
+  const context={save:saveTracked,trackingFields,getCard:id=>window.__latestCards.find(c=>c.id===id),cards:()=>window.__latestCards};
+  if(button.dataset.accountAction==='planning'){await showPlanning(tracking,card,context);return;}
+  if(button.dataset.accountAction==='payment'){showPayment(tracking,card,context);return;}
+  if(button.dataset.accountAction==='transfer'){showTransfer(tracking,card,context);return;}
   if(button.dataset.accountAction==='history')await showHistory(tracking,card,event=>correctObservation(card.id,event));
   else if(button.dataset.accountAction==='archive')await saveTracked(card,{...trackingFields(card),archived:!card.archived,updatedAt:new Date().toISOString()},'archive');
   else if(button.dataset.accountAction==='status')await saveTracked(card,{...trackingFields(card),status:card.status==='closed'?'open':'closed',updatedAt:new Date().toISOString()},'status');
@@ -1835,6 +1847,16 @@ function correctObservation(id,event){
  body.append(form);
 }
 for(const id of ['show-archived','stale-only','stale-days'])document.getElementById(id)?.addEventListener('change',()=>renderCards(window.__latestCards));
+function renderReminders(cards){
+ const box=document.getElementById('upcoming-reminders');if(!box)return;box.replaceChildren();
+ const days=Number(document.getElementById('promotion-warning-days')?.value)||7;
+ for(const card of cards)for(const reminder of reminders(card,localDate(),days)){
+  const row=uiElement('div',null,'tracker-history-row');row.append(uiElement('p',`${card.name} | ${reminder.date} | ${reminder.text}`));
+  row.append(uiButton('Review account',()=>showPlanning(tracking,card,{save:saveTracked,trackingFields,getCard:id=>window.__latestCards.find(c=>c.id===id),cards:()=>window.__latestCards})));box.append(row);
+ }
+ if(!box.childNodes.length)box.textContent='No statement deadlines or approaching promotion dates recorded. Add them under Statement & planning on an account.';
+}
+document.getElementById('promotion-warning-days')?.addEventListener('change',()=>renderReminders(window.__latestCards));
 if(document.getElementById('observation-date'))document.getElementById('observation-date').value=localDate();
 refreshEntry(form);
 

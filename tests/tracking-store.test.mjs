@@ -34,3 +34,14 @@ test("context binding rejects moving ciphertext to another account or user",asyn
   await assert.rejects(decryptAccount(docs.get(path),key,`${namespace}/cards/other`));
   assert.equal(revisionOf(null),"absent");store.close();await assert.rejects(store.pending());
 });
+test("linked transfers commit both accounts together and fees increase total balances",async()=>{
+ const {docs,store}=setup();const source=await store.enqueue(null,account,'add');
+ const targetAccount=createAccount({name:'Target',creditLimit:1000,availableCredit:800,apr:0});const target=await store.enqueue(null,targetAccount,'add');await store.flush();
+ const sourceAfter={...account,balance:700,availableCredit:300},targetAfter={...targetAccount,balance:310,availableCredit:690};
+ await store.enqueue(source,sourceAfter,'transfer',{amountCents:10000,feeCents:1000,other:{id:target.id,base:target._revision,after:targetAfter}});await store.flush();
+ const a=await decryptAccount(docs.get(`${namespace}/cards/${source.id}`),key,`${namespace}/cards/${source.id}`),b=await decryptAccount(docs.get(`${namespace}/cards/${target.id}`),key,`${namespace}/cards/${target.id}`);
+ assert.equal(a.balance+b.balance,1010);
+ const old=structuredClone(docs.get(`${namespace}/cards/${source.id}`));
+ await store.enqueue({...source,_revision:revisionOf(old)},sourceAfter,'transfer',{amountCents:1,feeCents:0,other:{id:target.id,base:'stale',after:targetAfter}});await store.flush();
+ assert.deepEqual(docs.get(`${namespace}/cards/${source.id}`),old);assert.equal((await store.pending())[0].status,'conflict');
+});
