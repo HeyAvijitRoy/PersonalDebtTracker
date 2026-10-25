@@ -1,5 +1,6 @@
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { syntheticPage } from './harness.mjs';
 const browser=await chromium.launch({headless:true});
 try{
@@ -26,6 +27,19 @@ try{
  await page.locator('#sim-budget').fill('200');await page.locator('#simulator details > summary').click();await page.locator('#sim-baseline-enabled').check();
  await page.getByLabel(large+' — planned baseline / month ($)',{exact:true}).fill('25');await page.getByLabel('Small — planned baseline / month ($)',{exact:true}).fill('25');
  await page.locator('#sim-run').click();assert.equal(await page.locator('#sim-output [data-strategy]').count(),2);assert.match(await page.locator('#sim-output').innerText(),/less interest than Snowball/);
+ const avalanche=page.locator('[data-strategy="avalanche"]'),snowball=page.locator('[data-strategy="snowball"]');
+ for(const tile of [avalanche,snowball]){
+  const first=tile.locator('.payment-month[data-month="1"]');assert.equal(await first.getAttribute('open'),'');assert.equal(await first.locator('tbody tr').count(),2);assert.match(await first.locator('tfoot').innerText(),/\$200\.00/);
+  const second=tile.locator('.payment-month[data-month="2"]');assert.equal(await second.getAttribute('open'),null);assert.equal(await second.locator('table').count(),0);await second.locator('summary').click();await second.locator('table').waitFor();await second.locator('summary').click();
+  const downloaded=page.waitForEvent('download');await tile.getByRole('button',{name:'Download payment schedule CSV',exact:true}).click();const csv=await readFile(await (await downloaded).path(),'utf8');assert.match(csv,/MONTH TOTAL/);assert.ok(csv.includes(large));assert.match(csv,/calendar labels are not due dates/);
+ }
+ assert.match(await avalanche.locator('.payment-month[data-month="1"] tbody tr').first().innerText(),/\$175\.00/);
+ await page.getByLabel('Small — planned baseline / month ($)',{exact:true}).fill('0');await page.locator('#sim-run').click();assert.match(await page.locator('#sim-output [role="alert"]').innerText(),/Small: \$0 baseline/);assert.equal(await page.locator('#sim-output [data-strategy]').count(),0);
+ await page.getByRole('button',{name:'Enter baseline payments',exact:true}).click();assert.equal(await page.getByLabel('Small — planned baseline / month ($)',{exact:true}).evaluate(input=>input===document.activeElement),true);
+ await page.getByLabel('Small — planned baseline / month ($)',{exact:true}).fill('25');
+ await page.locator('#sim-baseline-enabled').uncheck();await page.locator('#sim-run').click();await page.getByRole('button',{name:'Continue with $0 assumptions',exact:true}).click();assert.ok(await avalanche.locator('.payment-month[data-month="1"] .payment-zero').count()>0);
+ await page.locator('#sim-run').click();assert.match(await page.locator('#sim-output [role="alert"]').innerText(),/Review \$0/);
+ await page.locator('#sim-baseline-enabled').check();await page.locator('#sim-run').click();
  assert.equal(await page.locator('#plan-view img').count(),0);assert.equal(await page.evaluate(()=>window.__xss),undefined);
  assert.equal(await page.locator('#sim-output svg').count(),1);await page.screenshot({path:'test-results/payoff-plan-desktop.png',fullPage:true});
  await page.locator('#sim-mode').selectOption('deadline');assert.equal(await page.locator('#sim-budget-field').isVisible(),false);await page.locator('#sim-months').fill('12');await page.locator('#sim-run').click();assert.match(await page.locator('#sim-output').innerText(),/same deadline/);
@@ -41,12 +55,15 @@ try{
  await page.locator('#sim-run').click();
  await page.locator('#theme-toggle').click();await page.waitForFunction(()=>getComputedStyle(document.body).color==='rgb(243, 244, 246)');await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
  await page.screenshot({path:'test-results/payoff-plan-mobile-dark.png',fullPage:true,animations:'disabled'});
+ await avalanche.locator('.payment-plan').screenshot({path:'test-results/monthly-payments-mobile-dark.png',animations:'disabled'});
  await page.evaluate(()=>location.hash='#optimizer');await page.waitForFunction(()=>document.getElementById('optimizer').open);await page.locator('#optimizer > summary').click();assert.equal(await page.locator('#optimizer').getAttribute('open'),null);
  await page.setViewportSize({width:320,height:750});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
  await page.reload();await page.locator('#lock-pass').fill(password);await page.locator('#lock-unlock-btn').click();await page.locator('#main-app:not(.hidden)').waitFor();await page.waitForFunction(()=>document.getElementById('optimizer').open);assert.equal(await page.locator('#plan-view').isVisible(),true);
  await page.getByRole('link',{name:'Accounts',exact:true}).click();await page.locator('#dashboard-view').waitFor();assert.equal(await page.locator('#utilization-kpis > article').count(),2);
  await page.locator('#utilization-kpis').screenshot({path:'test-results/custom-utilization-kpis.png',animations:'disabled'});await page.locator('.target-editor').screenshot({path:'test-results/target-editor-mobile.png',animations:'disabled'});
  await page.getByRole('link',{name:'Payoff Plan',exact:true}).click();await page.locator('#plan-view').waitFor();await page.locator('#sim-budget').fill('200');await page.locator('#sim-run').click();
+ await page.getByRole('button',{name:'Continue with $0 assumptions',exact:true}).click();
  await page.locator('#sign-out-btn').click();assert.equal(await page.locator('#sim-budget').inputValue(),'');assert.equal(await page.locator('#sim-baseline-fields').textContent(),'');assert.equal(await page.locator('#utilization-kpis').textContent(),'');assert.equal(await page.locator('#sim-output svg').count(),0);assert.deepEqual(errors,[]);
- await context.close();console.log('Payoff browser passed: three views, dynamic target KPIs, budget/deadline comparison, optional baselines, safe text, no financial writes, legacy links, mobile layout, and private-state clearing.');
+ assert.equal(await page.locator('.payment-plan').count(),0);
+ await context.close();console.log('Payoff browser passed: monthly account schedules/CSV, zero-baseline review, three views, dynamic target KPIs, budget/deadline comparison, safe text, no financial writes, mobile layout, and private-state clearing.');
 }finally{await browser.close();}

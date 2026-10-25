@@ -1,3 +1,24 @@
+## 2026-10-25 - Monthly account payment schedules and zero-baseline review
+
+- Added per-account monthly payment plans above each strategy's payoff-order
+  summary. Month 1 opens by default; later months expand on demand. Show actual
+  modeled baseline/priority allocation, estimated interest and remaining balance,
+  monthly totals, and the smaller final payment.
+- Calendar labels start in the month after comparison and are explicitly planning
+  periods, not bank due dates. Kept existing summaries, chart, and aggregate table.
+- Every outstanding account with a zero/omitted baseline now triggers a review
+  alert before predictions appear. Users can enter statement-based baseline amounts
+  or explicitly continue with zero assumptions. Monthly zero-payment allocations
+  remain highlighted; input changes require fresh review. No bank minimums inferred.
+- Added separate strategy CSV downloads with monthly totals and model assumptions.
+  Reuses spreadsheet formula escaping; account names render as text. Inputs/results
+  remain in memory, clear on logout, and make no financial writes. Later-month
+  tables are built only when opened; deadline search skips account-detail capture.
+- Passed 72 unit tests and four synthetic browser suites, including monthly
+  reconciliation, final/rollover payments, date rollover, CSV injection protection,
+  zero-baseline review/edit/override, mobile/dark layouts and session cleanup.
+  No production debug output added. Cache v18. Firestore rules unchanged.
+
 ## 2026-10-25 - Payoff Plan, navigation, and custom utilization KPIs
 
 - Split the unlocked app into Accounts, Payoff Plan, and Progress. Moved existing

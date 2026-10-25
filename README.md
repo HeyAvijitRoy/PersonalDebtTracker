@@ -65,6 +65,9 @@ encrypted in the browser** before it ever reaches Firestore.
   monthly budget, or estimate the monthly amount needed for a target number of
   months. Optional per-account baseline payments are planning inputs, not bank
   minimums. See projected interest, total paid, first payoff, timelines and charts.
+  Each strategy includes a monthly per-account payment plan with month 1 expanded,
+  baseline/priority allocations, estimated interest and remaining balances, and a
+  CSV download. Zero baselines require review before displaying predictions.
 * **Balance-Transfer Optimizer:** pick a 0% target card, optionally cap its
   utilization, and get a move list with monthly + intro-period net savings vs.
   fees.

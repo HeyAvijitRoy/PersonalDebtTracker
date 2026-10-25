@@ -14,20 +14,20 @@ function portfolio(cards,baseline={}){
  if(add(rows.map(row=>row.balance))>MAX_MONEY_CENTS||add(rows.map(row=>row.base))>MAX_MONEY_CENTS)throw new Error('The portfolio exceeds the supported planning amount.');
  return rows;
 }
-function run(rows,budget,strategy,maxMonths=600){
+function run(rows,budget,strategy,maxMonths=600,captureAccounts=true){
  const initial=add(rows.map(row=>row.balance)),working=rows.map(row=>({...row,totalInterest:0,totalPaid:0}));
  const order=[...working].sort((a,b)=>strategy==='snowball'?a.balance-b.balance||b.rate-a.rate||a.id.localeCompare(b.id):b.rate-a.rate||a.balance-b.balance||a.id.localeCompare(b.id));
  const schedule=[{month:0,balanceCents:initial,interestCents:0,paidCents:0}],payoffOrder=[];
  let totalInterest=0,totalPaid=0;
  for(let month=1;month<=maxMonths&&working.some(row=>row.balance>0);month++){
   let monthlyInterest=0,remaining=budget;
-  for(const row of working){const cost=interest(row.balance,row.rate);row.balance+=cost;row.totalInterest+=cost;monthlyInterest+=cost;}
-  const pay=(row,amount)=>{const paid=Math.min(row.balance,amount,remaining);row.balance-=paid;row.totalPaid+=paid;remaining-=paid;};
-  for(const row of working)if(row.balance>0)pay(row,row.base);
+  for(const row of working){const cost=interest(row.balance,row.rate);row.opening=row.balance;row.monthInterest=cost;row.monthPaid=0;row.monthBaseline=0;row.balance+=cost;row.totalInterest+=cost;monthlyInterest+=cost;}
+  const pay=(row,amount)=>{const paid=Math.min(row.balance,amount,remaining);row.balance-=paid;row.totalPaid+=paid;row.monthPaid+=paid;remaining-=paid;return paid;};
+  for(const row of working)if(row.balance>0)row.monthBaseline=pay(row,row.base);
   for(const row of order)if(row.balance>0)pay(row,remaining);
   for(const row of order)if(!row.balance&&!payoffOrder.some(done=>done.id===row.id))payoffOrder.push({id:row.id,name:row.name,month,interestCents:row.totalInterest,paidCents:row.totalPaid});
   const balance=add(working.map(row=>row.balance)),paid=budget-remaining;totalInterest+=monthlyInterest;totalPaid+=paid;
-  schedule.push({month,balanceCents:balance,interestCents:monthlyInterest,paidCents:paid});
+  schedule.push({month,balanceCents:balance,interestCents:monthlyInterest,paidCents:paid,...(captureAccounts?{accounts:working.filter(row=>row.opening>0).map(row=>({id:row.id,name:row.name,openingCents:row.opening,interestCents:row.monthInterest,baselineCents:row.monthBaseline,extraCents:row.monthPaid-row.monthBaseline,paidCents:row.monthPaid,balanceCents:row.balance}))}:{})});
   if(balance>MAX_MONEY_CENTS||!Number.isSafeInteger(totalInterest))return {paid:false,error:'Balances grow beyond the supported range. Increase the payment or change the assumptions.'};
  }
  const paid=working.every(row=>row.balance===0);
@@ -46,7 +46,7 @@ export function comparePayoff(cards,{mode='budget',budget,months,baseline={}}={}
   if(mode==='deadline'){
    let low=Math.max(1,floor),high=Math.max(low,add(rows.map(row=>row.balance+interest(row.balance,row.rate))));
    if(high>MAX_MONEY_CENTS)throw new Error('The required payment exceeds the supported planning amount.');
-   while(low<high){const middle=Math.floor((low+high)/2),candidate=run(rows,middle,strategy,months);if(candidate.paid)high=middle;else low=middle+1;}
+   while(low<high){const middle=Math.floor((low+high)/2),candidate=run(rows,middle,strategy,months,false);if(candidate.paid)high=middle;else low=middle+1;}
    amount=low;
   }
   results[strategy]=run(rows,amount,strategy,mode==='deadline'?months:600);
