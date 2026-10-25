@@ -100,7 +100,7 @@ credential folders, test fixtures, or backups as a general directory server woul
    block old-client writes while preserving legacy reads; keep this maintenance
    gap short. Test owner and foreign-user access against the actual deployed rules.
 3. Publish this branch's tested application assets through the normal Pages
-   workflow. Service-worker cache v15 replaces older asset caches.
+   workflow. Service-worker cache v16 replaces older asset caches.
 4. Verify real sign-in/unlock, one account update with its encrypted event,
    offline/reconnect, backup/restore, Progress, and sign-out on the live deployment.
 5. Keep a schema-compatible client for rollback. Do not restore the old four-field
@@ -239,3 +239,21 @@ visible in the UI. Firestore initializes through persistentLocalCache with the
 multi-tab manager instead of the deprecated persistence initializer. This does
 not change encrypted outbox format, keys or server rules. Extension-injected and
 Cloudflare/browser messages remain outside application logging control.
+
+
+## Passphrase metadata and Cloudflare loading (2026-10-25)
+
+Both passphrase forms include a CSS-hidden autocomplete=username field populated
+from the authenticated account email/UID and cleared on session changes. It is
+not sent to the app's storage or included in account backups. Existing
+new-password/current-password annotations and native visibility controls remain.
+See [Chromium password-form guidance](https://www.chromium.org/developers/design-documents/form-styles-that-chromium-understands/).
+
+Theme, configuration and module scripts now use the correct static
+`data-cfasync="false"` attribute before src; the old `data-cf-async` spelling was
+not Cloudflare's opt-out. The app module explicitly uses anonymous CORS mode.
+See [Cloudflare exclusions](https://developers.cloudflare.com/speed/optimization/content/rocket-loader/ignore-javascripts/).
+If an older edge-cached page continues to produce Rocket Loader preload warnings,
+purge that page's Cloudflare cache or disable Rocket Loader for the app hostname
+with a Configuration Rule. Local browser tests validate markup and application
+behavior; they do not simulate Cloudflare's live transformation layer.

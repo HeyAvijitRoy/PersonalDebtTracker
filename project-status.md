@@ -1,3 +1,17 @@
+## 2026-10-25 - Passphrase form metadata and Rocket Loader exclusion
+
+- Corrected the misspelled data-cf-async attribute to Cloudflare's documented
+  data-cfasync="false" on theme/config/application scripts, before src. Marked
+  the module script crossorigin="anonymous" explicitly.
+- Added hidden autocomplete=username fields to both passphrase forms using the
+  signed-in account email or UID. Values remain in the DOM only and clear on
+  sign-out/session changes. Existing password autocomplete attributes are intact.
+- Left the existing browser-provided passphrase visibility control unchanged.
+  No duplicate eye control or debug output was added. Cache v16.
+- Verified 61 unit checks, build/syntax checks and three browser suites, including
+  script metadata, form username context and session cleanup. Cloudflare edge
+  caching/transform behavior still requires the user's browser refresh to verify.
+
 ## 2026-10-25 - Favicon, visible update reminders, and quiet production output
 
 - Added a blue/indigo card-and-paydown icon as SVG, multi-resolution ICO and Apple
