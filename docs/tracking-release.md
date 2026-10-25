@@ -78,7 +78,7 @@ Node 22. Patched transitive development dependencies are pinned through npm
 overrides and exercised by the build/emulator/browser checks. No npm packages
 are included in the deployed static artifact.
 
-Verified locally: 58 unit/crypto/model/session/server tests; eleven emulator rule
+Verified locally: 61 unit/crypto/model/session/server tests; twelve emulator rule
 tests; three synthetic browser suites; dependency audit with zero reported
 vulnerabilities. Checks include owner/anonymous/foreign-user
 rules; paired/stale writes; immutable/restored history; multi-batch purge; calculated
@@ -100,7 +100,7 @@ credential folders, test fixtures, or backups as a general directory server woul
    block old-client writes while preserving legacy reads; keep this maintenance
    gap short. Test owner and foreign-user access against the actual deployed rules.
 3. Publish this branch's tested application assets through the normal Pages
-   workflow. Service-worker cache v13 replaces older asset caches.
+   workflow. Service-worker cache v14 replaces older asset caches.
 4. Verify real sign-in/unlock, one account update with its encrypted event,
    offline/reconnect, backup/restore, Progress, and sign-out on the live deployment.
 5. Keep a schema-compatible client for rollback. Do not restore the old four-field
@@ -140,7 +140,7 @@ bare descending-key query failure reproduced with the emulator.
 
 Writes use revision-checked authenticated HTTPS transactions. Unconfirmed saves retain
 encrypted drafts for retry rather than claiming a save succeeded. No rules were
-weakened or deployed. Local validation: 58 unit checks, 11 emulator rule checks
+weakened or deployed. Local validation: 61 unit checks, 12 emulator rule checks
 (including real REST listing, history cursors and foreign-owner rejection), and
 all three browser suites. Startup coverage includes a stalled account listener,
 authenticated HTTPS account loading, and encrypted offline account recovery.
@@ -186,7 +186,7 @@ are unchanged.
 
 The initial HTTPS fallback covered reads while saves still used the stalled SDK
 transport. Account/history saves now use authenticated HTTPS read-write
-transactions with the same revision checks, atomic paired-event rules and
+optimistic commits with the same revision checks, atomic paired-event rules and
 idempotent encrypted operation IDs. Transactions retry bounded ABORTED contention;
 network errors, denied writes, session changes and uncertain commit responses retain
 the original encrypted draft. Previously committed immutable events are read and
@@ -201,3 +201,22 @@ Rules failures point to deploying the existing firestore.rules; rules were not
 weakened or deployed by this fix. REST emulator tests and browser transport stubs
 verify these cases, including a confirmed changed balance surviving offline reload.
 Real-user sync remains to be verified in the user's authenticated browser.
+
+
+## Browser-compatible optimistic commits (2026-10-25)
+
+The production console exposed 403 responses on BeginTransaction that emulator
+validation had not reproduced. The browser now follows the installed Firebase
+12.19.0 web SDK transaction model: BatchGet reads capture document updateTime or
+confirmed absence, then Commit sends version/existence preconditions on writes
+and verify mutations for every read-only document. All mutations apply atomically.
+ABORTED, FAILED_PRECONDITION and ALREADY_EXISTS contention rerun the full callback
+within a bounded retry count. A denied commit is retried only when a fresh server
+read proves a document version changed; unchanged denials remain permission errors. Missing document versions fail closed. No explicit
+BeginTransaction/rollback RPC or server/IAM credential is used.
+
+Browser mocks now deliberately deny BeginTransaction, so regression coverage
+includes this production-specific limitation. Emulator checks also force a real
+concurrent update and confirm the stale attempt cannot overwrite it. Other console
+warnings (browser extensions, preload credentials, favicon and deprecation notices)
+are separate from the failed sync request. Real-user confirmation remains necessary.

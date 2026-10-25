@@ -493,7 +493,7 @@ function renderSyncStatus() {
     const op=row.operation,line=document.createElement("div");line.className="tracker-sync-row";
     const text=document.createElement("span");
     const current=cloudCards.find(c=>c.id===op.accountId);
-    text.textContent=row.error==="rules"?`${op.after.name}: Firestore rejected this request. Deploy the current firestore.rules to the correct project, then retry; draft retained.`:row.status==="conflict"?`${op.after.name}: draft balance ${fmtMoney(op.after.balance)}; latest balance ${current?fmtMoney(current.balance):"account removed"}.`:op.after.name+": pending connection.";
+    text.textContent=row.error==="rules"?`${op.after.name}: Firestore rejected this request. Check deployed rules and Firebase project configuration; draft retained.`:row.status==="conflict"?`${op.after.name}: draft balance ${fmtMoney(op.after.balance)}; latest balance ${current?fmtMoney(current.balance):"account removed"}.`:op.after.name+": pending connection.";
     line.append(text);
     if(row.status==='conflict'){
       const details=document.createElement('details');details.className='tracker-details';const title=document.createElement('summary');title.textContent='Review all draft and latest fields';const values=document.createElement('pre');values.style.whiteSpace='pre-wrap';values.textContent=JSON.stringify({draft:op.after,linkedDraft:op.details?.other??null,latest:current?fieldsOf(current):null,linkedLatest:op.details?.other?cloudCards.find(card=>card.id===op.details.other.id)??null:null},null,2);details.append(title,values);line.append(details);

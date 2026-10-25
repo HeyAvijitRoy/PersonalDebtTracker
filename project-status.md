@@ -1,3 +1,17 @@
+## 2026-10-25 - Correct browser REST authentication compatibility
+
+- Console evidence identified production 403s on BeginTransaction. Replaced that
+  RPC with the Firebase web SDK's optimistic model: authenticated reads, document
+  update-time/existence preconditions and one atomic Commit. Read-only documents
+  are verified in the commit; contention replays all reads before retrying.
+- Existing encrypted draft IDs, revision checks, paired history and owner rules
+  are unchanged. No admin credential or broader permission was introduced.
+- Browser fixtures now deny explicit transactions, reproducing the production
+  authentication boundary missed by the emulator. Checked 61 unit tests, 12 rule
+  tests including real concurrent updates, and all three browser suites. Cache v14.
+- Permission messages distinguish denied requests from proof that rules are the
+  cause. The other pasted console items are nonblocking warnings or extensions.
+
 ## 2026-10-25 - Recover pending saves without the live SDK stream
 
 - Added owner-authenticated HTTPS transactions for account/history writes, with

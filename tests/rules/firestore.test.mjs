@@ -43,6 +43,18 @@ test('HTTPS account listing and history cursors obey owner rules',async()=>{
  const next=await owner.history('card',page.cursor,1);if(next.rows[0].id!=='first')throw new Error('Expected cursor to skip previous event');
  await assertFails(reader('other').accounts());await assertFails(reader('other').history('card'));
 });
+test('optimistic HTTPS commits detect concurrent changes and rerun before writing',async()=>{
+ const db=env.authenticatedContext('owner').firestore();await paired(db,'first');
+ const reader=new FirestoreReadClient({projectId:'demo-pdt',uid:'owner',getUser:()=>({uid:'owner',getIdToken:async()=>createMockUserToken({sub:'owner'},'demo-pdt')}),fetcher:(url,options)=>fetch(url.replace('https://firestore.googleapis.com','http://127.0.0.1:8085'),options)});
+ const writer=new FirestoreWriteClient(reader);let attempts=0;
+ await writer.transact(async tx=>{
+  const before=await tx.get(path);await tx.get(path+'/events/third');
+  if(++attempts===1)await paired(db,'second','first');
+  tx.set(path,card('third'));tx.set(path+'/events/third',event('third',before.revision));
+ });
+ assert.equal(attempts,2);assert.equal((await getDoc(doc(db,path))).data().revision,'third');
+ assert.equal((await getDoc(doc(db,path+'/events/third'))).data().previous,'second');
+});
 test("owner can atomically create/read a snapshot and history event",async()=>{
  const db=env.authenticatedContext("owner").firestore();await assertSucceeds(paired(db,"first"));
  await assertSucceeds(getDoc(doc(db,path)));await assertSucceeds(getDoc(doc(db,`${path}/events/first`)));
