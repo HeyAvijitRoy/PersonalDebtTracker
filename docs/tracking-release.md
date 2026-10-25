@@ -100,7 +100,7 @@ credential folders, test fixtures, or backups as a general directory server woul
    block old-client writes while preserving legacy reads; keep this maintenance
    gap short. Test owner and foreign-user access against the actual deployed rules.
 3. Publish this branch's tested application assets through the normal Pages
-   workflow. Service-worker cache v11 replaces older asset caches.
+   workflow. Service-worker cache v12 replaces older asset caches.
 4. Verify real sign-in/unlock, one account update with its encrypted event,
    offline/reconnect, backup/restore, Progress, and sign-out on the live deployment.
 5. Keep a schema-compatible client for rollback. Do not restore the old four-field
@@ -162,3 +162,21 @@ changes without dropping outstanding debt, menu keyboard access, checkbox spacin
 dark day-field padding, 390px/320px layouts, existing records/backup/Undo flows and
 private-state clearing. Dark mobile screenshots were visually inspected. No new
 financial calculations, storage format, permissions or dependencies were added.
+
+
+## Sticky header and Add Account modal (2026-10-25)
+
+The opaque sticky header measures its current height to offset section anchors.
+The Add Account form is a native modal outside route-specific views. Existing
+shortcuts and the My Accounts Add Account button use the same guarded entry
+point. Sorting/display controls remain on the account page in a labelled View &
+filters fieldset, with filters separated from sorting. All Actions operations
+have visible bordered button styling.
+
+Modal fields scroll independently while Add Account and Cancel remain visible.
+Errors are announced and scrolled into view inside the dialog. Cancel, Escape,
+completed saves and sign-out clear unfinished fields; the native modal traps
+focus and returns it on close. No draft is newly persisted. Browser checks cover
+these flows, private-state clearing, sticky scroll positioning, continued history/
+backup/Undo behavior, and dark mobile layout. Financial logic and access rules
+are unchanged.

@@ -1,3 +1,18 @@
+## 2026-10-25 - Sticky navigation and modal account entry
+
+- Made the header sticky with an opaque theme-aware background and measured
+  anchor offsets, so section navigation accounts for header wrapping.
+- Moved Add Account into a native modal with inline errors, Cancel/Escape,
+  focus management, scrollable fields and always-visible submission controls.
+  All add shortcuts open the same dialog; closing or signing out clears drafts.
+- Moved sort/display controls under My Accounts and grouped them with filters
+  in a labelled bordered panel and an internal separator. Styled every Actions
+  operation as a bordered button, with a distinct delete treatment.
+- Verified 55 unit checks and all three browser suites, including modal
+  validation/cancellation, private draft clearing, sticky positioning, visible
+  modal controls and narrow layouts. Reviewed dark mobile screenshots. Cache v12.
+  Local branch only; no push or deployment.
+
 ## 2026-10-25 - Account controls and dark-mode usability
 
 - Made Update balance and View history the visible card actions. Grouped planning,

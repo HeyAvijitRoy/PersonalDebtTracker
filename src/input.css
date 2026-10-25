@@ -4,6 +4,7 @@
 
 @layer base {
   html.dark { color-scheme: dark; }
+  body:has(dialog[open]) { overflow: hidden; }
   input[type="checkbox"], input[type="radio"] {
     width: 1rem; height: 1rem; margin-inline-end: .625rem;
     vertical-align: -.125em; flex-shrink: 0; accent-color: #0284c7;
@@ -14,12 +15,18 @@
 }
 
 @layer components {
+  .app-header { @apply sticky top-0 z-40 bg-white dark:bg-gray-900 py-3 shadow-sm; }
+  #main, #accounts, #hints, #strategies, #optimizer, #simulator, #progress-view { scroll-margin-top: calc(var(--app-header-height, 12rem) + 1rem); }
   .tracker-input { @apply block w-full mt-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100; }
   .tracker-input:focus { @apply outline-none ring-2 ring-sky-500; }
   .tracker-input[readonly] { @apply bg-gray-100 dark:bg-gray-800; }
   .tracker-inline-field { @apply inline-flex flex-wrap items-center gap-2 text-sm text-gray-700 dark:text-gray-200; }
   .tracker-day-input { @apply inline-block mt-0 text-center; width: 5.5rem; min-height: 2.75rem; }
-  .account-filters { @apply flex flex-wrap items-center gap-x-6 gap-y-3 my-4 text-sm; }
+  .account-view-panel { @apply min-w-0 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 p-4 mb-4; }
+  .account-view-panel legend { @apply px-2 text-xs font-semibold text-gray-600 dark:text-gray-300; }
+  .account-sort { @apply flex flex-wrap items-center gap-3 text-sm; }
+  .account-sort select { max-width: 100%; min-width: 0; }
+  .account-filters { @apply flex flex-wrap items-center gap-x-6 gap-y-3 mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 text-sm; }
   .account-filters > label { @apply py-1; }
   .account-toolbar { @apply flex flex-wrap items-center gap-2 mt-4 pt-3 border-t border-gray-200 dark:border-gray-700; }
   .account-update { @apply px-3 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-sm font-medium; }
@@ -27,10 +34,10 @@
   .account-menu { @apply text-sm; }
   .account-menu summary { @apply cursor-pointer rounded-lg px-3 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800; }
   .account-menu[open] { flex-basis: 100%; }
-  .account-menu-panel { @apply grid grid-cols-1 sm:grid-cols-2 gap-1 mt-2 p-2 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700; }
-  .account-menu-panel > button { @apply text-left px-3 py-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-800; min-height: 2.75rem; }
+  .account-menu-panel { @apply grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2 p-3 rounded-lg bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700; }
+  .account-menu-panel > button { @apply text-left px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-sm hover:bg-gray-100 dark:hover:bg-gray-700; min-height: 2.75rem; }
   .account-menu-heading { @apply col-span-full px-3 pt-2 pb-1 text-xs font-semibold text-gray-500 dark:text-gray-400; }
-  .account-menu-panel > .account-remove { @apply text-rose-700 dark:text-rose-300; }
+  .account-menu-panel > .account-remove { @apply text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-950; }
   .account-update:focus-visible, .account-history:focus-visible, .account-menu summary:focus-visible, .account-menu-panel > button:focus-visible { @apply outline-none ring-2 ring-sky-500 ring-offset-2 dark:ring-offset-gray-900; }
   .tracker-button.account-confirm { @apply ml-2 bg-sky-600 text-white hover:bg-sky-700 dark:text-white dark:hover:bg-sky-700; }
   .tracker-fields { @apply grid grid-cols-1 md:grid-cols-3 gap-4 text-sm; }
@@ -44,8 +51,13 @@
   .tracker-details summary { @apply cursor-pointer py-2 font-medium; }
   .tracker-undo { @apply fixed bottom-4 right-4 z-[1100] bg-gray-900 text-white text-sm px-3 py-2 rounded-lg shadow-lg; }
   .tracker-actions { @apply flex flex-wrap gap-2 my-2; }
-  .tracking-dialog { @apply rounded-xl p-5 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-xl border border-gray-200 dark:border-gray-700; width: min(46rem, calc(100vw - 2rem)); max-height: 90vh; overflow-y: auto; }
-  .tracking-dialog::backdrop { background: rgba(0,0,0,.6); }
+  .tracking-dialog, .account-add-dialog { @apply rounded-xl p-5 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-xl border border-gray-200 dark:border-gray-700; width: min(46rem, calc(100vw - 2rem)); max-height: 90vh; max-height: 90dvh; overflow-y: auto; }
+  .tracking-dialog::backdrop, .account-add-dialog::backdrop { background: rgba(0,0,0,.6); }
+  .account-add-dialog .tracker-fields { @apply md:grid-cols-2; }
+  .account-add-dialog[open] { display: flex; flex-direction: column; overflow: hidden; }
+  .account-add-dialog form { display: flex; flex-direction: column; min-height: 0; }
+  .add-account-fields { @apply space-y-4 px-1 py-1; min-height: 0; overflow-y: auto; }
+  .add-account-footer { @apply flex flex-wrap items-center justify-end gap-3 pt-4 mt-4 border-t border-gray-200 dark:border-gray-700; flex-shrink: 0; }
   .tracking-dialog h2 { @apply mb-3; }
   .tracking-dialog label { @apply block my-2 text-sm; }
   label:has(> input[type="checkbox"]) { @apply flex items-start; }

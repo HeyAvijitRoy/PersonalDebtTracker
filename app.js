@@ -27,6 +27,8 @@ let unreadableRecords=0;
 
 // ====== UI ELEMENTS ======
 const form = document.getElementById("debt-form");
+const addAccountDialog=document.getElementById('add-account-dialog');
+const addAccountError=document.getElementById('add-account-error');
 const cardList = document.getElementById("card-list");
 const avalancheList = document.getElementById("avalanche-list");
 const snowballList = document.getElementById("snowball-list");
@@ -111,10 +113,25 @@ window.__latestCards = [];
 
 // ====== NAV HELPERS ======
 window.focusAddForm = () => {
-  const nameInput = document.getElementById("card-name");
-  nameInput?.scrollIntoView({ behavior: "smooth", block: "center" });
-  nameInput?.focus();
+  if(!tracking||!cryptoKey||addAccountDialog.open)return;
+  addAccountDialog.showModal();
+  document.getElementById('card-name')?.focus();
 };
+function resetAddAccountForm(){
+  form.reset();
+  document.getElementById('observation-date').value=localDate();
+  addAccountError.textContent='';
+  form.querySelector('.add-account-fields').scrollTop=0;
+  form.querySelectorAll('[aria-invalid]').forEach(input=>input.removeAttribute('aria-invalid'));
+  refreshEntry(form);
+}
+document.getElementById('cancel-add-account')?.addEventListener('click',()=>{resetAddAccountForm();addAccountDialog.close();});
+addAccountDialog?.addEventListener('cancel',resetAddAccountForm);
+addAccountDialog?.addEventListener('close',()=>{if(!addAccountDialog.open)resetAddAccountForm();});
+const appHeader=document.querySelector('.app-header');
+if(appHeader&&typeof ResizeObserver!=='undefined')new ResizeObserver(()=>{
+  document.documentElement.style.setProperty('--app-header-height',`${appHeader.getBoundingClientRect().height}px`);
+}).observe(appHeader);
 
 // ====== THEME ======
 function setTheme(isDark) {
@@ -553,6 +570,7 @@ lockUnlockForm?.addEventListener("submit", async (e) => {
 });
 
 function clearUnlockedState() {
+  addAccountDialog?.close();resetAddAccountForm();
   stopAccountReads?.();stopAccountReads=null;refreshAccounts=null;accountReader=null;
   document.getElementById('account-connection')?.classList.add('hidden');
   lockRequest++;
@@ -1814,9 +1832,9 @@ function refreshEntry(root) {
 form?.addEventListener('input',()=>refreshEntry(form));
 form?.addEventListener('change',()=>refreshEntry(form));
 form?.addEventListener('submit',async e=>{
-  e.preventDefault();submitBtn.disabled=true;
-  try{const result=readEntry(form);await saveTracked(null,result.account,'add');form.reset();document.getElementById('observation-date').value=localDate();refreshEntry(form);toast('Account saved; sync status shown above.');}
-  catch(error){showModal('Not saved',error.message||'Could not save the account.');}
+  e.preventDefault();submitBtn.disabled=true;addAccountError.textContent='';
+  try{const result=readEntry(form);await saveTracked(null,result.account,'add');resetAddAccountForm();addAccountDialog.close();toast('Account saved; sync status shown above.');}
+  catch(error){if(addAccountDialog.open){addAccountError.textContent=error.message||'Could not save the account.';addAccountError.scrollIntoView({block:'nearest'});}}
   finally{submitBtn.disabled=false;}
 });
 cardList?.addEventListener('toggle',e=>{

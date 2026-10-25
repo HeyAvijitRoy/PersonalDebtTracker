@@ -122,7 +122,7 @@
     >
       <!-- Top Nav -->
       <header
-        class="flex flex-wrap items-center justify-between gap-3 mb-6 border-b border-gray-200 dark:border-gray-800 pb-3"
+        class="app-header flex flex-wrap items-center justify-between gap-3 mb-6 border-b border-gray-200 dark:border-gray-800"
       >
         <div class="flex items-center gap-2">
           <div
@@ -488,31 +488,31 @@
           </div>
         </section>
 
-        <!-- Input Form -->
+        <!-- Accounts List -->
         <section
-          class="bg-gray-50 dark:bg-gray-800/60 p-5 rounded-lg mb-8 shadow-sm border border-transparent dark:border-gray-800"
-          aria-labelledby="add-edit"
+          id="accounts"
+          class="bg-gray-50 dark:bg-gray-800/60 p-5 rounded-lg mb-8 shadow-sm border border-transparent dark:border-gray-800 scroll-mt-4"
         >
-          <h2 id="add-edit" class="text-lg font-semibold mb-4 text-gray-800 dark:text-gray-100">
-            Add Account
-          </h2>
-          <form id="debt-form" class="space-y-4" novalidate>
-            <div class="tracker-fields">
-              <label>Account name<input id="card-name" class="tracker-input" type="text" maxlength="60" placeholder="Account name" required /></label>
-              <label>Credit limit ($)<input id="limit" class="tracker-input" type="number" min="0" step="0.01" inputmode="decimal" required /></label>
-              <label class="entry-available">Available credit ($)<input id="available-credit" class="tracker-input" type="number" min="0" step="0.01" inputmode="decimal" aria-describedby="balance-preview" /></label>
-              <label>Estimated / direct balance ($)<input id="balance" class="tracker-input" type="number" min="0" step="0.01" inputmode="decimal" readonly /></label>
-              <label>Entered APR (%)<input id="apr" class="tracker-input" type="number" min="0" max="99.99" step="0.01" inputmode="decimal" required /></label>
-              <label>Balance entry<select id="entry-method" class="tracker-input"><option value="availableCredit">Calculate from available credit</option><option value="direct">Enter balance directly</option></select></label>
-              <label>Observed on<input id="observation-date" class="tracker-input" type="date" required /></label>
+          <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <div class="flex flex-wrap items-center gap-3">
+              <h2 class="text-lg font-semibold text-gray-800 dark:text-gray-100">My Accounts</h2>
+              <button id="open-add-account" type="button" class="account-update" onclick="focusAddForm()" aria-haspopup="dialog">+ Add Account</button>
             </div>
-            <p id="balance-preview" class="tracker-help" aria-live="polite"></p>
-            <p class="tracker-help">Estimated balance may include pending charges or holds and differ from the posted or statement balance.</p>
-            <details class="tracker-details"><summary>Optional reason and note</summary><label>Reason<input id="account-reason" class="tracker-input" maxlength="120" /></label><label>Note<textarea id="account-note" class="tracker-input" maxlength="1000"></textarea></label></details>
-            <div class="flex flex-wrap items-center gap-3 justify-between">
-              <button type="submit" id="submit-btn" class="px-5 py-2.5 bg-sky-600 text-white rounded-lg font-semibold hover:bg-sky-700 focus-visible:ring-2 focus-visible:ring-sky-500 disabled:opacity-60">Add Account</button>
+            <div class="flex items-center gap-3">
+              <input
+                id="account-search"
+                type="search"
+                placeholder="Search accounts…"
+                aria-label="Search accounts"
+                class="text-sm px-3 py-1.5 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500 w-40 sm:w-56"
+              />
+              <p class="text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap" id="accounts-meta"></p>
+            </div>
+          </div>
+          <fieldset class="account-view-panel">
+            <legend>View & filters</legend>
               <!-- Accounts controls -->
-              <div class="flex flex-wrap items-center gap-3">
+              <div class="account-sort">
                 <label class="text-sm text-gray-700 dark:text-gray-300" for="sort-by">Sort by</label>
                 <select
                   id="sort-by"
@@ -534,7 +534,7 @@
                   Desc
                 </button>
 
-                <label class="text-sm text-gray-700 dark:text-gray-300 ml-3" for="util-view"
+                <label class="text-sm text-gray-700 dark:text-gray-300" for="util-view"
                   >Utilization View</label
                 >
                 <select
@@ -545,34 +545,13 @@
                   <option value="pie">Pie</option>
                 </select>
               </div>
-            </div>
-          </form>
-        </section>
-
-        <!-- Accounts List -->
-        <section
-          id="accounts"
-          class="bg-gray-50 dark:bg-gray-800/60 p-5 rounded-lg mb-8 shadow-sm border border-transparent dark:border-gray-800 scroll-mt-4"
-        >
-          <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
-            <h2 class="text-lg font-semibold text-gray-800 dark:text-gray-100">My Accounts</h2>
-            <div class="flex items-center gap-3">
-              <input
-                id="account-search"
-                type="search"
-                placeholder="Search accounts…"
-                aria-label="Search accounts"
-                class="text-sm px-3 py-1.5 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500 w-40 sm:w-56"
-              />
-              <p class="text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap" id="accounts-meta"></p>
-            </div>
-          </div>
           <div class="account-filters">
             <label><input id="show-archived" type="checkbox" /> Show archived accounts</label>
             <label><input id="stale-only" type="checkbox" /> Needs an update</label>
             <label class="tracker-inline-field">Stale after <input id="stale-days" type="number" min="1" max="365" value="7" class="tracker-input tracker-day-input" /> days</label>
             <button class="tracker-button" type="button" onclick="exportData('history')">Export history CSV</button>
           </div>
+          </fieldset>
           <p class="tracker-help">Archiving hides a card but preserves its balance in totals. Permanent deletion removes its history; the 8-second Undo window closes before cleanup starts. JSON exports include full history and decrypted financial data.</p>
           <div
             id="card-list"
@@ -894,6 +873,34 @@
           <div id="progress-results" aria-live="polite"></div>
         </section>
       </main>
+
+      <dialog id="add-account-dialog" class="account-add-dialog" aria-labelledby="add-edit" aria-describedby="add-account-description">
+        <h2 id="add-edit" class="text-xl font-semibold mb-2">Add Account</h2>
+          <p class="tracker-help mb-4" id="add-account-description">Enter the current credit limit and available credit shown by your issuer to estimate the balance.</p>
+          <form id="debt-form" novalidate>
+            <div class="add-account-fields">
+            <div class="tracker-fields">
+              <label>Account name<input id="card-name" class="tracker-input" type="text" maxlength="60" placeholder="Account name" required /></label>
+              <label>Credit limit ($)<input id="limit" class="tracker-input" type="number" min="0" step="0.01" inputmode="decimal" required /></label>
+              <label class="entry-available">Available credit ($)<input id="available-credit" class="tracker-input" type="number" min="0" step="0.01" inputmode="decimal" aria-describedby="balance-preview" /></label>
+              <label>Estimated / direct balance ($)<input id="balance" class="tracker-input" type="number" min="0" step="0.01" inputmode="decimal" readonly /></label>
+              <label>Entered APR (%)<input id="apr" class="tracker-input" type="number" min="0" max="99.99" step="0.01" inputmode="decimal" required /></label>
+              <label>Balance entry<select id="entry-method" class="tracker-input"><option value="availableCredit">Calculate from available credit</option><option value="direct">Enter balance directly</option></select></label>
+              <label>Observed on<input id="observation-date" class="tracker-input" type="date" required /></label>
+            </div>
+            <p id="balance-preview" class="tracker-help" aria-live="polite"></p>
+            <p class="tracker-help">Estimated balance may include pending charges or holds and differ from the posted or statement balance.</p>
+            <details class="tracker-details"><summary>Optional reason and note</summary><label>Reason<input id="account-reason" class="tracker-input" maxlength="120" /></label><label>Note<textarea id="account-note" class="tracker-input" maxlength="1000"></textarea></label></details>
+            <p id="add-account-error" class="text-sm text-rose-700 dark:text-rose-300" role="alert"></p>
+            </div>
+            <div class="add-account-footer">
+              <button type="submit" id="submit-btn" class="px-5 py-2.5 bg-sky-600 text-white rounded-lg font-semibold hover:bg-sky-700 focus-visible:ring-2 focus-visible:ring-sky-500 disabled:opacity-60">Add Account</button>
+              <button type="button" id="cancel-add-account" class="tracker-button">Cancel</button>
+
+            </div>
+          </form>
+      </dialog>
+
     </div>
 
     <!-- Footer -->
