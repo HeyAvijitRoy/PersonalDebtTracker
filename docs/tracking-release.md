@@ -100,7 +100,7 @@ credential folders, test fixtures, or backups as a general directory server woul
    block old-client writes while preserving legacy reads; keep this maintenance
    gap short. Test owner and foreign-user access against the actual deployed rules.
 3. Publish this branch's tested application assets through the normal Pages
-   workflow. Service-worker cache v18 replaces older asset caches.
+   workflow. Service-worker cache v19 replaces older asset caches.
 4. Verify real sign-in/unlock, one account update with its encrypted event,
    offline/reconnect, backup/restore, Progress, and sign-out on the live deployment.
 5. Keep a schema-compatible client for rollback. Do not restore the old four-field
