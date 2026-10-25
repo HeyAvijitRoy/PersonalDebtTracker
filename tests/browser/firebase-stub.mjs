@@ -44,6 +44,6 @@ export const getDocs=async reference=>{
  for(const c of reference.constraints??[]){if(c.kind==='order'&&c.direction==='desc')paths.reverse();if(c.kind==='after')paths=paths.filter(p=>p.split('/').at(-1)<c.id);if(c.kind==='limit')paths=paths.slice(0,c.count);}
  return {docs:paths.map(snapshot),size:paths.length,empty:paths.length===0};
 };
-export const getDocsFromServer=getDocs;
+export const getDocsFromServer=reference=>globalThis.__syntheticHistoryHangs?new Promise(()=>{}):getDocs(reference);
 export const writeBatch=()=>{const operations=[];return {delete:reference=>operations.push(()=>docs.delete(reference.path)),set:(reference,value)=>operations.push(()=>docs.set(reference.path,value)),commit:async()=>{operations.forEach(fn=>fn());emit();}};};
 `;

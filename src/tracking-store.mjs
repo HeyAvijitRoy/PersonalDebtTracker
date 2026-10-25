@@ -16,8 +16,8 @@ export async function decryptEvent(raw,key,path) {
 }
 
 export class TrackingStore {
-  constructor({namespace,key,adapter,outbox,isActive=()=>true,onChange=()=>{}}) {
-    Object.assign(this,{namespace,key,adapter,outbox,isActive,onChange});
+  constructor({namespace,key,adapter,outbox,isActive=()=>true,onChange=()=>{},onCommitted=()=>{}}) {
+    Object.assign(this,{namespace,key,adapter,outbox,isActive,onChange,onCommitted});
     this.closed=false;this.queueTail=Promise.resolve();
   }
   active() { if(this.closed||!this.isActive()) throw new Error("Session changed. Unlock again."); }
@@ -65,7 +65,7 @@ export class TrackingStore {
         const op=row.operation;
         if(blocked.has(op.accountId))continue;
         try {
-          await this.adapter.transact(async tx=>{
+          const confirmed=await this.adapter.transact(async tx=>{
             this.active();
             const path=cardPath(this.namespace,op.accountId);
             const eventPath=`${path}/events/${op.id}`;
@@ -82,7 +82,13 @@ export class TrackingStore {
               const sealed=await sealJSON(restored,key,restoredPath,32768);this.active();
               tx.set(restoredPath,{...sealed,v:2,revision:restored.id,previous:"backup"});return;
             }
-            if(eventRaw) {await decryptEvent(eventRaw,key,eventPath);return;}
+            if(eventRaw) {
+              await decryptEvent(eventRaw,key,eventPath);
+              const views=[];
+              if(raw)views.push({...await decryptAccount(raw,key,path),id:op.accountId,_revision:revisionOf(raw),_purging:raw.purging??false,_encrypted:raw});
+              if(op.type==='transfer'&&op.details.other){const otherId=safeId(op.details.other.id),otherPath=cardPath(this.namespace,otherId),other=await tx.get(otherPath);if(other)views.push({...await decryptAccount(other,key,otherPath),id:otherId,_revision:revisionOf(other),_purging:other.purging??false,_encrypted:other});}
+              return views;
+            }
             if(raw?.purging)throw new Error("Permanent deletion is in progress.");
             if(revisionOf(raw)!==op.base) {const error=new Error("A newer version exists. Review your saved draft before applying it.");error.code="conflict";throw error;}
             const before=raw?await decryptAccount(raw,key,path):null;
@@ -103,7 +109,11 @@ export class TrackingStore {
             tx.set(path,snapshot);
             tx.set(eventPath,{...sealed,v:2,revision:op.id,previous:op.base.startsWith("legacy:")?"legacy":op.base});
             if(linked){tx.set(linked.path,linked.snapshot);tx.set(linked.eventPath,linked.event);}
+            const views=[{...op.after,id:op.accountId,_revision:op.id,_purging:snapshot.purging,_encrypted:snapshot}];
+            if(linked)views.push({...op.details.other.after,id:op.details.other.id,_revision:op.id,_purging:false,_encrypted:linked.snapshot});
+            return views;
           });
+          this.active();this.onCommitted(confirmed??[]);
           await this.outbox.remove(row.key);
         } catch(error) {
           if(this.closed||!this.isActive())return;

@@ -2,23 +2,10 @@ import { chromium } from "playwright";
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import { readFile } from "node:fs/promises";
-import { app,auth,firestore } from "./firebase-stub.mjs";
+import { syntheticPage } from "./harness.mjs";
 const browser=await chromium.launch({headless:true});
 try {
- const context=await browser.newContext({serviceWorkers:"block",viewport:{width:1280,height:900}});
- const page=await context.newPage();page.setDefaultTimeout(10000);const errors=[];
- page.on("pageerror",error=>errors.push(error.message));
- await page.route("**/*",async route=>{
-  const url=new URL(route.request().url());
-  if(url.hostname==="www.gstatic.com"){
-   const body=url.pathname.endsWith("firebase-app.js")?app:url.pathname.endsWith("firebase-auth.js")?auth:firestore;
-   return route.fulfill({contentType:"text/javascript",body});
-  }
-  if(url.hostname!=="127.0.0.1")return route.abort();
-  if(url.pathname.endsWith("/env.js"))return route.fulfill({contentType:"text/javascript",body:"window.__FIREBASE_CONFIG={apiKey:'synthetic',projectId:'synthetic-project'};"});
-  return route.continue();
- });
- await page.goto(process.env.PDT_TEST_URL??"http://127.0.0.1:5173/");
+ const {context,page,errors}=await syntheticPage(browser);page.setDefaultTimeout(10000);
  await page.locator("#lock-pass1").fill("synthetic-passphrase");await page.locator("#lock-pass2").fill("synthetic-passphrase");await page.locator("#lock-setup-btn").click();
  await page.locator("#main-app:not(.hidden)").waitFor();
  await page.locator('#open-add-account').click();
