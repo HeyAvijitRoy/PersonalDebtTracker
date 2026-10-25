@@ -580,6 +580,12 @@ preserve their capabilities while replacing misleading names and hidden assumpti
 
 ## Completed extension - 2026-10-25
 
+- Added monthly per-account payment schedules to each payoff strategy, first month
+  expanded, later months lazy-rendered, with baseline/priority allocation, interest,
+  remaining balances, calendar labels, monthly totals, and safe CSV download.
+  Zero/omitted baselines require review before predictions; explicit continuation
+  retains clear zero-allocation warnings. No issuer minimum-payment calculation.
+
 - Accounts, Payoff Plan, and Progress now share one unlocked session, with
   import/export under Settings & data and legacy links retained.
 - Compare Avalanche and Snowball with either a combined monthly budget or target
