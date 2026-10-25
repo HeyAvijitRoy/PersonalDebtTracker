@@ -30,6 +30,7 @@ jobs:
 
       - name: Check and test
         run: |
+          npm ci
           npm run check
           npm test
 

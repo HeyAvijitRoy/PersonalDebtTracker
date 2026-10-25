@@ -1,2 +1,8 @@
 creds/
 env.js
+node_modules/
+.tools/
+.firebase/
+*-debug.log
+test-results/
+dist/

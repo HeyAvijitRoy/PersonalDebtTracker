@@ -184,9 +184,10 @@ broke behind Cloudflare Rocket Loader.)
 
 ### Development checks
 
-Use Node.js 22 or newer; these checks need no npm dependencies:
+Use Node.js 22 or newer. Install local development tools once:
 
 ```powershell
+npm.cmd ci
 npm.cmd test
 npm.cmd run check
 ```
@@ -195,6 +196,10 @@ On macOS/Linux, use `npm test` and `npm run check` (not run on those platforms).
 The tests cover money calculations, account-schema compatibility, AES-GCM
 round-trips/tamper rejection, session boundaries, and public-asset caching.
 They do not replace authenticated browser or Firestore security-rule tests.
+
+Run `npm.cmd run test:rules` with Java 21+ available to verify owner isolation,
+atomic snapshot/history writes, stale revisions, immutable history, and purge
+permissions against the local demo Firestore emulator. This never deploys rules.
 
 The next implementation stages are tracked in
 [`implementation-plan.md`](implementation-plan.md). The new available-credit
